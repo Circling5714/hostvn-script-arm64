@@ -34,13 +34,17 @@ Toàn bộ tính năng bản VPS được giữ: Nginx 1.30 (HTTP/2+3, brotli, v
 
 **Nguyên nhân gốc:** storage của container là file loop ext4, nằm sau lớp **mã hóa dm-crypt/FBE** do tiến trình **`vold`** (Volume Daemon) của Android quản lý. Bão ghi liên tục của InnoDB (redo-log fsync, checkpoint flush, doublewrite) **làm nghẽn đường I/O mã hóa → watchdog của vold hết giờ → vold chết → Android reboot**. Đây **không** phải do đếm số fsync (thử 800×`dd conv=fsync` + 200×`sync` vẫn sống), mà do **độ trễ ghi tích lũy** dưới tải DB liên tục. Đặt container lên `/data` giúp giảm nhưng **chưa đủ** — vì `/data` cũng bị vold/dm-crypt quản lý.
 
-**Cách khắc phục (đã tích hợp sẵn, đã kiểm chứng):** dùng **`eatmydata`** — thư viện `LD_PRELOAD` biến `fsync/fdatasync/sync/msync` thành no-op:
-- Giai đoạn cài: chạy toàn bộ `hostvn.run` dưới `eatmydata`.
-- Lúc chạy: `_svc` khởi động `mysqld_safe`/`mariadb-install-db` dưới `LD_PRELOAD=libeatmydata`.
+**Cách khắc phục (đã tích hợp sẵn, đã kiểm chứng)** — cần **ba lớp bổ trợ nhau**, vì mỗi lớp chặn một loại I/O đồng bộ khác nhau:
 
-> **Kiểm chứng:** ghi liên tục **3.200.000 dòng InnoDB** (nhân bản + UPDATE toàn bảng, 64s ghi liên tục) dưới eatmydata → **không reboot**, uptime liên tục.
+1. **`eatmydata`** — `LD_PRELOAD` biến `fsync/fdatasync/sync/msync` của **ứng dụng** thành no-op. Áp cho toàn bộ `hostvn.run` lúc cài và cho `mysqld_safe`/`mariadb-install-db` lúc chạy. → xử lý bão fsync của InnoDB.
+2. **`nobarrier` + `vm.dirty_bytes` thấp** (hàm `_hostvn_harden_android_io` trong `menu/helpers/environment`, chạy mỗi lần source):
+   - `mount -o remount,nobarrier /` — chặn **barrier/FLUSH của chính ext4 journal** (do *kernel* phát khi tạo/xoá nhiều file — composer, `wp package install`, giải nén). eatmydata **không** chặn được lớp này.
+   - `vm.dirty_bytes=8MB`, `dirty_background_bytes=4MB` — ép writeback **nhỏ giọt** thay vì để kernel dồn ~1GB (mặc định `dirty_ratio=20%`) rồi flush một cục làm nghẽn storage.
+3. **Cấu hình InnoDB an toàn cho Android** — `innodb_flush_method=fsync` (không O_DIRECT), `innodb_doublewrite=0`, `innodb_flush_neighbors=0`, `innodb_flush_log_at_trx_commit=0`, io_capacity thấp.
 
-**Đánh đổi (cần biết):** eatmydata làm mất bảo đảm bền vững (durability) khi mất điện đột ngột — có cửa sổ mất dữ liệu vài giây và rủi ro hỏng InnoDB nếu cúp điện đúng lúc ghi. Với một node web chạy trên điện thoại (edge/thử nghiệm), đây là đánh đổi chấp nhận được để máy không reboot. Khuyến nghị: cắm nguồn ổn định và **backup định kỳ** (menu backup Rclone/S3 có sẵn).
+> **Kiểm chứng:** (a) ghi **3.200.000 dòng InnoDB** liên tục dưới eatmydata; (b) **3 vòng tạo+xoá 30.000 file + `dd` 2GB** dưới nobarrier+vm.dirty — **đều không reboot** (cùng workload này reboot ngay khi chưa có fix). Chẩn đoán: `bootreason` luôn là `reboot,vold-failed`, máy **mát** (không phải nhiệt).
+
+**Đánh đổi (cần biết):** khử fsync + nobarrier làm **giảm bảo đảm bền vững (durability)** khi mất điện đột ngột — có cửa sổ mất dữ liệu vài giây và rủi ro hỏng InnoDB/FS nếu cúp điện đúng lúc ghi. Với một node web chạy trên điện thoại (edge/thử nghiệm), đây là đánh đổi chấp nhận được để máy không reboot. Khuyến nghị: **cắm nguồn ổn định** (hoặc pin còn tốt) và **backup định kỳ** (menu backup Rclone/S3 có sẵn).
 
 ## 4. Cài đặt
 
