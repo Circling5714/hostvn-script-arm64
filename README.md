@@ -34,16 +34,23 @@ Toàn bộ tính năng bản VPS được giữ: Nginx 1.30 (HTTP/2+3, brotli, v
 
 **Nguyên nhân gốc:** storage của container là file loop ext4, nằm sau lớp **mã hóa dm-crypt/FBE** do tiến trình **`vold`** (Volume Daemon) của Android quản lý. Bão ghi liên tục của InnoDB (redo-log fsync, checkpoint flush, doublewrite) **làm nghẽn đường I/O mã hóa → watchdog của vold hết giờ → vold chết → Android reboot**. Đây **không** phải do đếm số fsync (thử 800×`dd conv=fsync` + 200×`sync` vẫn sống), mà do **độ trễ ghi tích lũy** dưới tải DB liên tục. Đặt container lên `/data` giúp giảm nhưng **chưa đủ** — vì `/data` cũng bị vold/dm-crypt quản lý.
 
-**Cách khắc phục (đã tích hợp sẵn, đã kiểm chứng)** — cần **ba lớp bổ trợ nhau**, vì mỗi lớp chặn một loại I/O đồng bộ khác nhau:
+**Cách khắc phục (đã tích hợp sẵn, đã kiểm chứng)** — mỗi lớp chặn một loại I/O nặng khác nhau xuống storage mã hóa:
+
+0. **MariaDB datadir trên tmpfs (RAM) — fix QUYẾT ĐỊNH.** Toàn bộ I/O của MariaDB (kể cả I/O nền: buffer pool load, checkpoint, purge) diễn ra trong RAM, **không bao giờ chạm vold**. DB được "sinh ra" ngay trên tmpfs khi cài (mount trước `apt install mariadb-server`), nên không cần copy đĩa→RAM. Đồng bộ ("persist") RAM→đĩa `/var/lib/mysql.persist` khi tắt + mỗi 10 phút (cron), và seed đĩa→RAM khi khởi động — mọi copy đều **throttle 6MB/s** (`rsync --bwlimit`) vì trên máy này ngay cả đọc/ghi ~100MB liên tục cũng làm sập vold. Tắt bằng `HOSTVN_DB_TMPFS=no`.
+
+Kèm theo:
 
 1. **`eatmydata`** — `LD_PRELOAD` biến `fsync/fdatasync/sync/msync` của **ứng dụng** thành no-op. Áp cho toàn bộ `hostvn.run` lúc cài và cho `mysqld_safe`/`mariadb-install-db` lúc chạy. → xử lý bão fsync của InnoDB.
 2. **`nobarrier` + `vm.dirty_bytes` thấp** (hàm `_hostvn_harden_android_io` trong `menu/helpers/environment`, chạy mỗi lần source):
    - `mount -o remount,nobarrier /` — chặn **barrier/FLUSH của chính ext4 journal** (do *kernel* phát khi tạo/xoá nhiều file — composer, `wp package install`, giải nén). eatmydata **không** chặn được lớp này.
    - `vm.dirty_bytes=8MB`, `dirty_background_bytes=4MB` — ép writeback **nhỏ giọt** thay vì để kernel dồn ~1GB (mặc định `dirty_ratio=20%`) rồi flush một cục làm nghẽn storage.
 3. **Cấu hình InnoDB an toàn cho Android** — `innodb_flush_method=fsync` (không O_DIRECT), `innodb_doublewrite=0`, `innodb_flush_neighbors=0`, `innodb_flush_log_at_trx_commit=0`, io_capacity thấp.
-4. **Chống OOM (hết RAM cũng gây `vold-failed`)** — Android đã chiếm ~3/5.4GB nên không thể cấp phát theo tổng RAM vật lý. Trên Android: cap `innodb_buffer_pool_size=128M`, `max_connections=50`, php-fpm `pm.max_children≤8`, và **bỏ qua `wp package install`** (Composer giải dependency + `memory_limit=-1` là thủ phạm làm bung RAM → `lmkd` giết `vold` → reboot). Hai package wp-cli đó không bắt buộc, cài thủ công sau nếu cần.
+4. **Chống OOM (hết RAM cũng gây `vold-failed`)** — Android đã chiếm ~3/5.4GB nên không thể cấp phát theo tổng RAM vật lý. Trên Android: cap `innodb_buffer_pool_size=128M`, `max_connections=50`, php-fpm `pm.max_children≤8`, `oom_score_adj=1000` cho tiến trình container (để lmkd giết tiến trình *của container* thay vì vold), và **bỏ qua `wp package install`** (Composer + `memory_limit=-1` làm bung RAM). Hai package wp-cli đó không bắt buộc, cài thủ công sau nếu cần.
+5. **`dpkg force-unsafe-io`** — pha cài gói (`apt`/`dpkg`) trong script `ubuntu` không được eatmydata bao; `dpkg` fsync mỗi gói khi cài 300+ gói làm nghẽn vold. Tắt fsync của dpkg toàn cục.
 
-> **Kiểm chứng:** (a) ghi **3.200.000 dòng InnoDB** liên tục dưới eatmydata; (b) **3 vòng tạo+xoá 30.000 file + `dd` 2GB** dưới nobarrier+vm.dirty — **đều không reboot** (cùng workload này reboot ngay khi chưa có fix); (c) reboot cuối cùng đúng tại bước Composer → xác nhận là OOM. Chẩn đoán: `bootreason` luôn là `reboot,vold-failed`, máy **mát** (không phải nhiệt).
+> **Lưu ý sửa lỗi quan trọng:** một bug trong lớp `_svc` khiến `restart php-fpm` gọi sai tên binary (`php8.4-fpm` thay vì `php-fpm8.4`) → biến `bin` rỗng → `pkill -f ""` **khớp mọi tiến trình, giết cả `vold`** → reboot. Đây mới là nguyên nhân thật của các reboot "lúc khởi động dịch vụ" (không phải I/O). Đã sửa.
+
+> **Kiểm chứng:** (a) ghi **3.200.000 dòng InnoDB** liên tục dưới eatmydata; (b) **3 vòng tạo+xoá 30.000 file + `dd` 2GB** dưới nobarrier+vm.dirty — đều không reboot; (c) bring-up đầy đủ MariaDB(tmpfs)+php-fpm+nginx **phục vụ HTTP 200 + phpMyAdmin (401 auth)**, uptime liên tục. Chẩn đoán: `bootreason` luôn `reboot,vold-failed`, máy **mát** (không phải nhiệt).
 
 **Đánh đổi (cần biết):** khử fsync + nobarrier làm **giảm bảo đảm bền vững (durability)** khi mất điện đột ngột — có cửa sổ mất dữ liệu vài giây và rủi ro hỏng InnoDB/FS nếu cúp điện đúng lúc ghi. Với một node web chạy trên điện thoại (edge/thử nghiệm), đây là đánh đổi chấp nhận được để máy không reboot. Khuyến nghị: **cắm nguồn ổn định** (hoặc pin còn tốt) và **backup định kỳ** (menu backup Rclone/S3 có sẵn).
 
