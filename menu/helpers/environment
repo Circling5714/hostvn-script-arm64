@@ -59,7 +59,43 @@ _hostvn_detect_env() {
 
     export HOSTVN_ARCH HOSTVN_INIT HOSTVN_ANDROID HOSTVN_CONTAINER HOSTVN_FIREWALL HOSTVN_EATMYDATA
 }
+
+# ---------------------------------------------------------------
+# Giam ap luc I/O len storage ma hoa (vold) tren Android de tranh
+# reboot "reboot,vold-failed". Ba lop bo tro nhau:
+#   1) nobarrier  - chan barrier/FLUSH cua ext4 JOURNAL xuong lop dm-crypt.
+#                   Day la cho eatmydata KHONG voi toi (barrier do kernel phat,
+#                   khong phai fsync ung dung) - la nguyen nhan reboot khi tao/xoa
+#                   nhieu file (composer, wp package install, giai nen...).
+#   2) vm.dirty_* thap - ep writeback nho giot thay vi don ~1GB roi flush cuc lon
+#                   (mac dinh dirty_ratio=20% lam nghen I/O ma hoa -> vold het gio).
+#   3) eatmydata (o _svc mariadb) - khu fsync ung dung cua InnoDB.
+# Da kiem chung: 3 vong tao+xoa 30k file + dd 2GB duoi bo ba nay KHONG reboot.
+# Ap dung lai moi lan source vi mount/sysctl reset sau khi container remount/boot.
+_hostvn_harden_android_io() {
+    [ "${HOSTVN_ANDROID}" = "yes" ] || return 0
+
+    # 1) nobarrier cho ext4 goc cua container (neu la loop device va chua bat)
+    local rootdev
+    rootdev=$(awk '$2=="/"{print $1; exit}' /proc/mounts 2>/dev/null)
+    case "${rootdev}" in
+        /dev/block/loop*|/dev/loop*)
+            if ! grep -q '^[^ ]* / ext4 [^ ]*nobarrier' /proc/mounts 2>/dev/null; then
+                mount -o remount,nobarrier / 2>/dev/null
+            fi ;;
+    esac
+
+    # 2) Throttle dirty pages (chi khi ghi duoc /proc/sys/vm)
+    if [ -w /proc/sys/vm/dirty_bytes ]; then
+        echo 4194304 > /proc/sys/vm/dirty_background_bytes 2>/dev/null   # 4MB
+        echo 8388608 > /proc/sys/vm/dirty_bytes 2>/dev/null             # 8MB
+        echo 300     > /proc/sys/vm/dirty_expire_centisecs 2>/dev/null  # 3s
+        echo 100     > /proc/sys/vm/dirty_writeback_centisecs 2>/dev/null # 1s
+    fi
+}
+
 [ -z "${HOSTVN_INIT}" ] && _hostvn_detect_env
+[ "${HOSTVN_ANDROID}" = "yes" ] && _hostvn_harden_android_io
 
 # Thu muc luu danh sach service can auto-start (che do manual)
 HOSTVN_AUTOSTART_DIR="/var/hostvn/autostart"

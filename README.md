@@ -1,102 +1,66 @@
-<p align="center"><strong>Auto Install & Optimize LEMP Stack on Ubuntu (22.04, 24.04, 26.04)</strong></p>
+<p align="center"><strong>HostVN Script ARM64 — Chạy LEMP Stack trên thiết bị Android đã root</strong></p>
 <p align="center"><strong>##############################################</strong></p>
 
-This is a shell script used to install LEMP Stack (Nginx - MariaDB - PHP-FPM) on Ubuntu 22.04 / 24.04 / 26.04 LTS.
+Bản **ARM64 / Android** của HostVN Script: cài đặt và tối ưu **LEMP Stack (Nginx – MariaDB – PHP-FPM)** để chạy website **ngay trên điện thoại/thiết bị Android đã root** (qua chroot Linux Deploy), bên cạnh bản VPS gốc.
 
-> Đây là bản **rebuild** từ HOSTVN Script gốc (vốn chỉ hỗ trợ Ubuntu 18.04/20.04), được cập nhật để tương thích với các phiên bản Ubuntu LTS mới nhất.
+> Đây là một **sản phẩm riêng**, fork từ [hostvn-script](https://github.com/Circling5714/hostvn-script) (bản rebuild cho Ubuntu mới). Điểm khác cốt lõi: chạy được ở môi trường **không có systemd** và xử lý các đặc thù của storage Android để không làm treo/reboot máy.
 
-<b>Please do not copy or distribute this for commercial purposes, donations. Thank you.</b>
+<b>Please do not copy or distribute this for commercial purposes. Thank you.</b>
 
-## 1. Script Details:
+---
 
-### 1.1. Installation
+## 1. Khác biệt so với bản VPS
 
-- Nginx **1.30.x** (stable) build từ source với **PCRE2 + OpenSSL 3 của hệ thống**, hỗ trợ **HTTP/2 + HTTP/3**, kèm module: ngx_cache_purge (fork nginx-modules), headers-more, brotli, vts.
-- MariaDB **11.8 LTS** (repo chính thức, tự fallback về gói distro nếu repo chưa hỗ trợ bản Ubuntu mới).
-- PHP đa phiên bản qua PPA ondrej/php: **8.4, 8.3, 8.2, 7.4** (chọn được 2 bản chạy song song).
-- phpMyAdmin **5.2.x**.
-- Configure Nginx FastCGI cache, Brotli Compress.
-- Install PHPMemcachedAdmin, phpRedisAdmin, Opcache Dashboard.
-- Install memcached, redis cache (not enabled by default) — PHP extension build từ **PECL chính thức**.
-- Install Fail2ban, Let's Encrypt SSL (acme.sh), CloudFlare DNS API.
-- Install WP-CLI, Composer, supervisor, Rclone, ClamAV, ImunifyAV.
-- DO NOT COLLECT ANY INFORMATION ON YOUR VPS.
+- ✅ **Lớp trừu tượng service (`_svc`)** trong `menu/helpers/environment`: tự phát hiện môi trường (`systemd` hay `manual`, Android hay không, container hay không, firewall có sẵn không) và quản lý nginx / php-fpm / mariadb / redis / memcached / fail2ban / cron / cloudflared / supervisor **trực tiếp** khi không có systemd (chroot / Linux Deploy / Android).
+- ✅ **Khử fsync bằng `eatmydata`** cho MariaDB trên Android — xem [mục 3](#3-vấn-đề-vold-reboot-và-cách-khắc-phục-quan-trọng-nhất). Đây là thay đổi quan trọng nhất để bản ARM64 hoạt động ổn định.
+- ✅ **Giới hạn `make -j` = 2** khi build nginx trên Android (tránh OOM/quá nhiệt).
+- ✅ Cấu hình InnoDB an toàn cho loop/dm-crypt: `innodb_flush_method=fsync` (không dùng O_DIRECT), `innodb_doublewrite=0`, `innodb_use_native_aio=0`, `innodb_flush_neighbors=0`, io_capacity thấp.
+- ✅ Bỏ phụ thuộc `sudo` (chroot chạy sẵn bằng root); MariaDB manual dùng đúng socket `/run/mysqld/mysqld.sock`.
+- ✅ Gate **ImunifyAV** chỉ cho x86_64 (không có bản ARM64) → trên ARM dùng **ClamAV**.
+- ✅ Bỏ qua tạo swap / kernel tweak / mở port firewall khi môi trường không hỗ trợ.
 
-### 1.2. Thay đổi so với bản gốc (rebuild 2026)
+Toàn bộ tính năng bản VPS được giữ: Nginx 1.30 (HTTP/2+3, brotli, vts), MariaDB 11.8, PHP đa phiên bản (8.4/8.3/8.2/7.4), phpMyAdmin, FastCGI cache, Fail2ban (+ đồng bộ Cloudflare WAF), SSL acme.sh, WP-CLI, backup Rclone/S3, Telegram bot… — chạy qua menu `hostvn`.
 
-- ✅ Hỗ trợ Ubuntu **22.04 / 24.04 / 26.04** (bỏ 18.04/20.04, Debian).
-- ✅ Nginx 1.24 → **1.30.4**; bỏ OpenSSL 1.1.1t (EOL) và PCRE 8.45 tĩnh → dùng **OpenSSL 3 + PCRE2** của hệ thống, thêm **HTTP/3**.
-- ✅ MariaDB 10.11 → **11.8 LTS**; bỏ SHA256 hardcode của `mariadb_repo_setup` → dùng keyring + deb822 sources chính thức.
-- ✅ PHP mặc định 8.2 → **8.4**; sửa điều kiện gói `php-json` (PHP 8+ đã tích hợp sẵn).
-- ✅ Kiểm tra PPA ondrej/php có hỗ trợ suite trước khi thêm (Ubuntu 26.04 fallback về PHP distro).
-- ✅ Thay `mysql_secure_installation` heredoc bằng SQL trực tiếp (root giữ cả unix_socket + password auth).
-- ✅ Set `DEBIAN_FRONTEND=noninteractive` + `NEEDRESTART_MODE=a` (tránh treo prompt needrestart trên 22.04+).
-- ✅ Sửa tên gói apt cho Ubuntu mới: `python3`, `libncurses-dev`, `libaio-dev`, `libpcre2-dev`…
-- ✅ PHP extension (redis/memcached/igbinary) tải từ **PECL chính thức** thay vì server hostvn đã chết.
-- ✅ NodeJS 12/14 → **NodeJS 22 LTS** (NodeSource keyring + repo nodistro).
-- ✅ ImunifyAV mở khoá cho 20.04/22.04/24.04/26.04 (trước chỉ 18.04).
-- ✅ Cài đặt **local-first**: ưu tiên file trong repo đã clone, fallback tải online (link chỉnh trong 1 biến).
-- ✅ Sửa bug menu update tải sai file; nginx `listen 443 ssl` + `http2 on;` theo syntax mới.
-- ❌ **Bỏ ngx_pagespeed** — Google đã ngừng phát triển, không có binary PSOL và không compile được trên toolchain mới.
-- ❌ Bỏ Nextcloud auto-install (phụ thuộc bundle từ server gốc đã ngừng hoạt động).
+## 2. Yêu cầu môi trường
 
-### 1.3. Optimization & Security & WordPress & Backup
+- Thiết bị Android **đã root** (Magisk), kiến trúc **aarch64/arm64**, RAM ≥ 3GB (khuyến nghị ≥ 4GB để build nginx).
+- **Linux Deploy** (hoặc chroot tương đương) với **Ubuntu 22.04 / 24.04** arm64.
+- ⚠️ **Image container BẮT BUỘC đặt trên `/data` (block storage thật), KHÔNG đặt trên `/storage/emulated/0` (FUSE/sdcardfs).** Xem mục 3.
+- Cho phép exec từ `/data` dưới SELinux (thường có sẵn với Magisk).
 
-Giữ nguyên đầy đủ tính năng bản gốc: tối ưu cấu hình theo tài nguyên VPS, chạy 2 phiên bản PHP song song, mỗi website một user riêng, Fail2ban, đổi port SSH, quản trị WordPress (cache plugin, backup GG Drive/local qua Rclone, đổi domain, update plugin...), firewall, Telegram notify... Xem menu `hostvn` sau khi cài.
+## 3. Vấn đề vold-reboot và cách khắc phục (QUAN TRỌNG NHẤT)
 
-## 2. Requirements
+**Triệu chứng:** khi cài (đặc biệt lúc MariaDB khởi tạo / import DB nặng) thiết bị **tự khởi động lại**. Kiểm tra: `getprop ro.boot.bootreason` → `reboot,vold-failed`.
 
-- VPS tối thiểu 512MB RAM, chưa cài dịch vụ nào.
-- **Ubuntu 22.04, 24.04 hoặc 26.04 LTS** (26.04 ở chế độ experimental — PPA ondrej/php có thể chưa hỗ trợ).
+**Nguyên nhân gốc:** storage của container là file loop ext4, nằm sau lớp **mã hóa dm-crypt/FBE** do tiến trình **`vold`** (Volume Daemon) của Android quản lý. Bão ghi liên tục của InnoDB (redo-log fsync, checkpoint flush, doublewrite) **làm nghẽn đường I/O mã hóa → watchdog của vold hết giờ → vold chết → Android reboot**. Đây **không** phải do đếm số fsync (thử 800×`dd conv=fsync` + 200×`sync` vẫn sống), mà do **độ trễ ghi tích lũy** dưới tải DB liên tục. Đặt container lên `/data` giúp giảm nhưng **chưa đủ** — vì `/data` cũng bị vold/dm-crypt quản lý.
 
-## 3. Installation
+**Cách khắc phục (đã tích hợp sẵn, đã kiểm chứng):** dùng **`eatmydata`** — thư viện `LD_PRELOAD` biến `fsync/fdatasync/sync/msync` thành no-op:
+- Giai đoạn cài: chạy toàn bộ `hostvn.run` dưới `eatmydata`.
+- Lúc chạy: `_svc` khởi động `mysqld_safe`/`mariadb-install-db` dưới `LD_PRELOAD=libeatmydata`.
 
-### Cách 1: Cài từ repo clone (khuyến nghị)
+> **Kiểm chứng:** ghi liên tục **3.200.000 dòng InnoDB** (nhân bản + UPDATE toàn bảng, 64s ghi liên tục) dưới eatmydata → **không reboot**, uptime liên tục.
+
+**Đánh đổi (cần biết):** eatmydata làm mất bảo đảm bền vững (durability) khi mất điện đột ngột — có cửa sổ mất dữ liệu vài giây và rủi ro hỏng InnoDB nếu cúp điện đúng lúc ghi. Với một node web chạy trên điện thoại (edge/thử nghiệm), đây là đánh đổi chấp nhận được để máy không reboot. Khuyến nghị: cắm nguồn ổn định và **backup định kỳ** (menu backup Rclone/S3 có sẵn).
+
+## 4. Cài đặt
+
+Bên trong chroot Ubuntu (đã có mạng, đã `apt update`):
 
 ```sh
-apt update && apt install git -y
-git clone https://github.com/Circling5714/hostvn-script.git hostvn-script
-cd hostvn-script && bash install
+apt install git -y
+git clone https://github.com/Circling5714/hostvn-script-arm64.git
+cd hostvn-script-arm64 && bash install
 ```
 
-### Cách 2: Cài online (qua GitHub Pages)
+Script tự phát hiện Android/không-systemd và áp dụng toàn bộ điều chỉnh ở trên. Sau khi cài xong, quản trị bằng lệnh `hostvn`.
 
-```sh
-wget https://circling5714.github.io/hostvn-script/install && bash install
-```
+**Lưu ý cho dev:** sau khi sửa bất kỳ file nào trong `menu/`, phải đóng gói lại: `tar -czf menu.tar.gz menu` (LF line-ending).
 
-Link tải mặc định đặt tại biến `SCRIPT_LINK`/`HOSTVN_SCRIPT_LINK` trong `install` và `UPDATE_LINK` trong `menu/helpers/variable_common` — nếu fork thì đổi về repo của bạn trước khi phân phối.
+## 5. Nguồn phần mềm
 
-### Cài trên Proxmox LXC
+Giống bản VPS (Nginx, MariaDB, PHP ondrej, phpMyAdmin, PECL, Rclone, WP-CLI, ClamAV…) — xem `PROJECT.md`.
 
-Script tự phát hiện môi trường container và bỏ qua tạo swap, kernel tweak, đồng thời tắt MariaDB native AIO. Yêu cầu: template Ubuntu 22.04/24.04, unprivileged OK, **bật `nesting=1`**, RAM ≥ 2GB khi cài (compile nginx). Swap cấu hình ở Proxmox → Resources.
+## 6. Credits
 
-**Lưu ý cho dev:** sau khi sửa bất kỳ file nào trong `menu/`, phải đóng gói lại: `tar -czf menu.tar.gz menu` (line-ending LF).
-
-## 4. Software download sources
-
-- Nginx: http://nginx.org/en/download.html
-- MariaDB: https://mariadb.org/
-- PHP: https://launchpad.net/~ondrej/+archive/ubuntu/php
-- phpMyAdmin: https://www.phpmyadmin.net/
-- ngx_cache_purge: https://github.com/nginx-modules/ngx_cache_purge
-- headers-more: https://github.com/openresty/headers-more-nginx-module
-- nginx-module-vts: https://github.com/vozlt/nginx-module-vts
-- PECL (redis/memcached/igbinary): https://pecl.php.net/
-- NodeSource: https://github.com/nodesource/distributions
-- PHPMemcachedAdmin: https://github.com/elijaa/phpmemcachedadmin
-- phpRedisAdmin: https://github.com/erikdubbelboer/phpRedisAdmin
-- Rclone: https://rclone.org/
-- WP-CLI: https://wp-cli.org/
-- Composer: https://getcomposer.org/
-- ClamAV: https://www.clamav.net/
-- ImunifyAV: https://www.imunify360.com/antivirus
-
-## 5. Credits
-
-### Original Developers / Maintainers
-- Sanvv (HOSTVN)
-- f97
-
-### Rebuild for modern Ubuntu
-- QMV (2026)
+- Gốc: Sanvv (HOSTVN), f97
+- Rebuild Ubuntu mới + bản ARM64/Android: QMV (2026)
