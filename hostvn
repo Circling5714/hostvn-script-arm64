@@ -2707,6 +2707,19 @@ EOmy_cnf
         sed -i 's|^innodb_flush_method = O_DIRECT|innodb_flush_method = fsync|' /etc/mysql/my.cnf
         sed -i '/# innodb settings/a innodb_doublewrite = 0' /etc/mysql/my.cnf
         sed -i '/# innodb settings/a innodb_flush_neighbors = 0' /etc/mysql/my.cnf
+
+        # Datadir chay tren tmpfs (RAM) -> dong bo dinh ky ra dia moi 10 phut
+        # de du lieu ton tai qua reboot/tat container (xem _hostvn_db_persist).
+        mkdir -p /var/hostvn
+        cat > /var/hostvn/db-persist.sh <<'EOpersist'
+#!/bin/bash
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+[ -f /var/hostvn/menu/helpers/environment ] && source /var/hostvn/menu/helpers/environment 2>/dev/null
+type _hostvn_db_persist >/dev/null 2>&1 && _hostvn_db_persist
+EOpersist
+        chmod +x /var/hostvn/db-persist.sh
+        mkdir -p /etc/cron.d
+        echo '*/10 * * * * root /var/hostvn/db-persist.sh >/dev/null 2>&1' > /etc/cron.d/hostvn-db-persist
     fi
 
     sql_root_pass=$(gen_pass)

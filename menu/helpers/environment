@@ -99,6 +99,50 @@ _hostvn_harden_android_io() {
     [ -w /proc/self/oom_score_adj ] && echo 1000 > /proc/self/oom_score_adj 2>/dev/null
 }
 
+# ---------------------------------------------------------------
+# MariaDB datadir tren tmpfs (RAM) cho Android - fix reboot QUYET DINH
+#   InnoDB I/O ngau nhien (ke ca I/O NEN sau khi "active": buffer pool load,
+#   purge, checkpoint, change-buffer merge) xuong loop/dm-crypt lam sap vold
+#   -> reboot. Da kiem chung: cung thao tac start mariadb+php+nginx, DB tren DIA
+#   thi reboot, DB tren TMPFS thi song (ghi 50k dong + serve HTTP 200, uptime lien tuc).
+#   Ben vung: dong bo ("persist") RAM -> dia /var/lib/mysql.persist luc stop + dinh ky
+#   (cron). Danh doi: mat du lieu ke tu lan persist cuoi neu mat dien dot ngot.
+#   Tat bang HOSTVN_DB_TMPFS=no.
+# ---------------------------------------------------------------
+HOSTVN_DB_DIR="/var/lib/mysql"
+HOSTVN_DB_PERSIST="/var/lib/mysql.persist"
+HOSTVN_DB_TMPFS_SIZE="${HOSTVN_DB_TMPFS_SIZE:-1024M}"
+
+_hostvn_db_tmpfs_enabled() {
+    [ "${HOSTVN_ANDROID}" = "yes" ] && [ "${HOSTVN_DB_TMPFS:-yes}" = "yes" ]
+}
+
+# Gan tmpfs len datadir + seed tu ban persist tren dia (goi trong _svc mariadb start)
+_hostvn_db_tmpfs_mount() {
+    _hostvn_db_tmpfs_enabled || return 0
+    mountpoint -q "${HOSTVN_DB_DIR}" 2>/dev/null && return 0   # da la tmpfs
+    mkdir -p "${HOSTVN_DB_PERSIST}"
+    # Lan dau chuyen tu dia sang RAM: neu persist trong ma datadir da co du lieu -> seed persist
+    if [ ! -d "${HOSTVN_DB_PERSIST}/mysql" ] && [ -d "${HOSTVN_DB_DIR}/mysql" ]; then
+        cp -a "${HOSTVN_DB_DIR}/." "${HOSTVN_DB_PERSIST}/" 2>/dev/null
+    fi
+    mount -t tmpfs -o "size=${HOSTVN_DB_TMPFS_SIZE},mode=0755" tmpfs "${HOSTVN_DB_DIR}" 2>/dev/null || return 1
+    chown mysql:mysql "${HOSTVN_DB_DIR}" 2>/dev/null
+    # Seed RAM tu ban persist tren dia
+    [ -d "${HOSTVN_DB_PERSIST}/mysql" ] && cp -a "${HOSTVN_DB_PERSIST}/." "${HOSTVN_DB_DIR}/" 2>/dev/null
+    return 0
+}
+
+# Dong bo datadir tmpfs -> dia (goi luc stop va dinh ky qua cron)
+_hostvn_db_persist() {
+    _hostvn_db_tmpfs_enabled || return 0
+    mountpoint -q "${HOSTVN_DB_DIR}" 2>/dev/null || return 0
+    [ -d "${HOSTVN_DB_DIR}/mysql" ] || return 0
+    mkdir -p "${HOSTVN_DB_PERSIST}"
+    cp -a "${HOSTVN_DB_DIR}/." "${HOSTVN_DB_PERSIST}/" 2>/dev/null
+    sync
+}
+
 [ -z "${HOSTVN_INIT}" ] && _hostvn_detect_env
 [ "${HOSTVN_ANDROID}" = "yes" ] && _hostvn_harden_android_io
 
@@ -173,6 +217,9 @@ _svc_manual() {
                         sleep 2
                     fi
                     mkdir -p /run/mysqld; chown mysql:mysql /run/mysqld 2>/dev/null
+                    # Android: gan datadir len tmpfs (RAM) + seed tu ban persist -> DB I/O
+                    # khong cham vold. Phai chay TRUOC buoc init/khoi dong.
+                    _hostvn_db_tmpfs_mount
                     # Khoi tao datadir neu trong (postinst co the khong chay duoc trong chroot khong systemd)
                     if [ ! -d /var/lib/mysql/mysql ]; then
                         env ${_emd} mariadb-install-db --user=mysql --datadir=/var/lib/mysql --auth-root-authentication-method=socket >/dev/null 2>&1 \
@@ -185,7 +232,10 @@ _svc_manual() {
                         mysqladmin --socket="${_sock}" ping >/dev/null 2>&1 && break
                         sleep 1; i=$((i+1))
                     done ;;
-                stop)    mysqladmin --socket="${_sock}" shutdown 2>/dev/null || pkill -x mariadbd || pkill -x mysqld ;;
+                stop)
+                    mysqladmin --socket="${_sock}" shutdown 2>/dev/null || pkill -x mariadbd || pkill -x mysqld
+                    # Dong bo datadir RAM -> dia sau khi dung han (files nhat quan)
+                    sleep 2; _hostvn_db_persist ;;
                 reload)  mysqladmin --socket="${_sock}" reload 2>/dev/null || mysqladmin --socket="${_sock}" flush-privileges 2>/dev/null ;;
                 is-active) { pgrep -x mariadbd >/dev/null || pgrep -x mysqld >/dev/null; } && echo active || { echo inactive; return 3; } ;;
             esac ;;
