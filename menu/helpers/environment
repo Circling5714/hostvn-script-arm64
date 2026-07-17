@@ -221,14 +221,20 @@ _svc_manual() {
             esac ;;
 
         php*-fpm)
-            local bin="/usr/sbin/${svc}"
-            [ -x "${bin}" ] || bin="$(command -v "${svc}" 2>/dev/null)"
+            # QUAN TRONG: ten service HostVN la 'php8.4-fpm' NHUNG binary Debian la
+            # 'php-fpm8.4' (dao vi tri). Neu dung nham '/usr/sbin/php8.4-fpm' -> khong ton
+            # tai -> bin rong -> 'pkill -f ""' khop MOI tien trinh -> giet ca vold -> REBOOT.
+            # Rut phien ban roi tao dung ten binary + pattern master; TUYET DOI khong pkill rong.
+            local _ver="${svc#php}"; _ver="${_ver%-fpm}"          # php8.4-fpm -> 8.4
+            local bin="/usr/sbin/php-fpm${_ver}"
+            [ -x "${bin}" ] || bin="$(command -v "php-fpm${_ver}" 2>/dev/null)"
+            local master="php-fpm${_ver}: master"
             case "${action}" in
-                start)   [ -x "${bin}" ] && "${bin}" ;;
-                stop)    pkill -f "${svc}: master" 2>/dev/null || pkill -f "${bin}" ;;
-                restart) pkill -f "${svc}: master" 2>/dev/null; pkill -f "${bin}" 2>/dev/null; sleep 1; [ -x "${bin}" ] && "${bin}" ;;
-                reload)  pkill -USR2 -f "${svc}: master" 2>/dev/null || { pkill -f "${bin}" 2>/dev/null; sleep 1; "${bin}"; } ;;
-                is-active) pgrep -f "${svc}: master" >/dev/null && echo active || { echo inactive; return 3; } ;;
+                start)   [ -x "${bin}" ] && { mkdir -p /run/php; "${bin}"; } ;;
+                stop)    pgrep -f "${master}" >/dev/null 2>&1 && pkill -f "${master}" ;;
+                restart) pgrep -f "${master}" >/dev/null 2>&1 && pkill -f "${master}"; sleep 1; [ -x "${bin}" ] && { mkdir -p /run/php; "${bin}"; } ;;
+                reload)  pgrep -f "${master}" >/dev/null 2>&1 && pkill -USR2 -f "${master}" ;;
+                is-active) pgrep -f "${master}" >/dev/null && echo active || { echo inactive; return 3; } ;;
             esac ;;
 
         mariadb|mysql|mysqld)
