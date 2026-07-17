@@ -42,7 +42,22 @@ _hostvn_detect_env() {
         HOSTVN_FIREWALL="no"
     fi
 
-    export HOSTVN_ARCH HOSTVN_INIT HOSTVN_ANDROID HOSTVN_CONTAINER HOSTVN_FIREWALL
+    # eatmydata (libeatmydata): bien fsync/fdatasync/sync/msync thanh no-op qua LD_PRELOAD.
+    # BAT BUOC tren Android: storage cua container la file loop tren /data (ext4) da qua
+    # lop ma hoa (dm-crypt/FBE) do 'vold' quan ly. Bao ghi lien tuc cua InnoDB (redo log,
+    # checkpoint flush, doublewrite) lam nghen I/O -> watchdog cua vold het gio -> Android
+    # reboot (getprop ro.boot.bootreason = "reboot,vold-failed"). Khu fsync bang eatmydata
+    # loai bo cac cu dinh tre dong bo nay. Da kiem chung: ghi 3.2 trieu dong InnoDB lien
+    # tuc duoi eatmydata KHONG con reboot.
+    HOSTVN_EATMYDATA=""
+    if [ "${HOSTVN_ANDROID}" = "yes" ]; then
+        for _emd in /usr/lib/*/libeatmydata.so.1 /usr/lib/libeatmydata.so.1 \
+                    /usr/lib/*/libeatmydata.so /usr/lib/libeatmydata.so; do
+            [ -e "${_emd}" ] && { HOSTVN_EATMYDATA="${_emd}"; break; }
+        done
+    fi
+
+    export HOSTVN_ARCH HOSTVN_INIT HOSTVN_ANDROID HOSTVN_CONTAINER HOSTVN_FIREWALL HOSTVN_EATMYDATA
 }
 [ -z "${HOSTVN_INIT}" ] && _hostvn_detect_env
 
@@ -103,27 +118,34 @@ _svc_manual() {
             esac ;;
 
         mariadb|mysql|mysqld)
+            # Socket dung dung /run/mysqld/mysqld.sock cho khop [client] trong my.cnf
+            # (config HostVN co [mysqld_safe] socket=/var/lib/mysql/mysql.sock -> neu khong
+            #  ep, server va client lech socket -> moi lenh mysql khi cai deu that bai).
+            local _sock=/run/mysqld/mysqld.sock
+            # LD_PRELOAD eatmydata (chi tren Android, khi co lib) - khu fsync tranh reboot vold
+            local _emd=""
+            [ -n "${HOSTVN_EATMYDATA}" ] && _emd="LD_PRELOAD=${HOSTVN_EATMYDATA}"
             case "${action}" in
                 start|restart)
                     if [ "${action}" = "restart" ]; then
-                        mysqladmin shutdown 2>/dev/null || pkill -x mariadbd 2>/dev/null || pkill -x mysqld 2>/dev/null
+                        mysqladmin --socket="${_sock}" shutdown 2>/dev/null || pkill -x mariadbd 2>/dev/null || pkill -x mysqld 2>/dev/null
                         sleep 2
                     fi
                     mkdir -p /run/mysqld; chown mysql:mysql /run/mysqld 2>/dev/null
                     # Khoi tao datadir neu trong (postinst co the khong chay duoc trong chroot khong systemd)
                     if [ ! -d /var/lib/mysql/mysql ]; then
-                        mariadb-install-db --user=mysql --datadir=/var/lib/mysql --auth-root-authentication-method=socket >/dev/null 2>&1 \
-                            || mysql_install_db --user=mysql --datadir=/var/lib/mysql >/dev/null 2>&1
+                        env ${_emd} mariadb-install-db --user=mysql --datadir=/var/lib/mysql --auth-root-authentication-method=socket >/dev/null 2>&1 \
+                            || env ${_emd} mysql_install_db --user=mysql --datadir=/var/lib/mysql >/dev/null 2>&1
                     fi
-                    setsid mysqld_safe --skip-syslog >/dev/null 2>&1 < /dev/null &
-                    # Cho toi khi mariadb san sang (toi da 40s) truoc khi tra ve
+                    env ${_emd} setsid mysqld_safe --skip-syslog --socket="${_sock}" >/dev/null 2>&1 < /dev/null &
+                    # Cho toi khi mariadb san sang (toi da 60s) truoc khi tra ve
                     local i=0
-                    while [ $i -lt 40 ]; do
-                        mysqladmin ping >/dev/null 2>&1 && break
+                    while [ $i -lt 60 ]; do
+                        mysqladmin --socket="${_sock}" ping >/dev/null 2>&1 && break
                         sleep 1; i=$((i+1))
                     done ;;
-                stop)    mysqladmin shutdown 2>/dev/null || pkill -x mariadbd || pkill -x mysqld ;;
-                reload)  mysqladmin reload 2>/dev/null || mysqladmin flush-privileges 2>/dev/null ;;
+                stop)    mysqladmin --socket="${_sock}" shutdown 2>/dev/null || pkill -x mariadbd || pkill -x mysqld ;;
+                reload)  mysqladmin --socket="${_sock}" reload 2>/dev/null || mysqladmin --socket="${_sock}" flush-privileges 2>/dev/null ;;
                 is-active) { pgrep -x mariadbd >/dev/null || pgrep -x mysqld >/dev/null; } && echo active || { echo inactive; return 3; } ;;
             esac ;;
 

@@ -445,6 +445,17 @@ EOmariadb_sources
 innodb_use_native_aio = 0
 innodb_flush_method = fsync
 EOF
+        # Android: giam khoi luong ghi InnoDB (tat doublewrite, khong flush moi commit,
+        # io_capacity thap) - ket hop eatmydata de tranh treo vold luc postinst init datadir.
+        if [ "${HOSTVN_ANDROID}" = "yes" ]; then
+            cat >> /etc/mysql/conf.d/99-hostvn-container.cnf <<EOF
+innodb_doublewrite = 0
+innodb_flush_log_at_trx_commit = 0
+innodb_io_capacity = 100
+innodb_io_capacity_max = 400
+innodb_flush_neighbors = 0
+EOF
+        fi
         # Chan postinst tu dong start service (chroot khong co init; ta se start bang _svc)
         printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d
         chmod +x /usr/sbin/policy-rc.d
@@ -2669,6 +2680,13 @@ EOmy_cnf
     if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
         sed -i '/# innodb settings/a innodb_use_native_aio = 0' /etc/mysql/my.cnf
     fi
+    # Android: O_DIRECT tren loop/dm-crypt khong on dinh + bao ghi InnoDB de treo vold.
+    # Chuyen sang fsync (da bi eatmydata bien thanh no-op) va tat doublewrite de giam ghi.
+    if [ "${HOSTVN_ANDROID}" = "yes" ]; then
+        sed -i 's|^innodb_flush_method = O_DIRECT|innodb_flush_method = fsync|' /etc/mysql/my.cnf
+        sed -i '/# innodb settings/a innodb_doublewrite = 0' /etc/mysql/my.cnf
+        sed -i '/# innodb settings/a innodb_flush_neighbors = 0' /etc/mysql/my.cnf
+    fi
 
     sql_root_pass=$(gen_pass)
     sql_admin_pass=$(gen_pass)
@@ -2751,7 +2769,12 @@ opcache_dashboard() {
 # Rclone
 ############################################
 install_rclone() {
-    curl https://rclone.org/install.sh | sudo bash
+    # chroot/Android thuong khong co sudo; script da chay bang root nen goi truc tiep
+    if command -v sudo >/dev/null 2>&1; then
+        curl https://rclone.org/install.sh | sudo bash
+    else
+        curl https://rclone.org/install.sh | bash
+    fi
 }
 
 install_wp_cli_packages() {
