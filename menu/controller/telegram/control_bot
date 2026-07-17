@@ -19,7 +19,7 @@ SERVICE="/etc/systemd/system/hostvn-telegram-bot.service"
 SERVICE_NAME="hostvn-telegram-bot"
 
 _status() {
-    if systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
+    if _svc_active "${SERVICE_NAME}" 2>/dev/null; then
         printf "%s\n" "${GREEN}Bot dang chay (che do: $(grep '^BOT_MODE=' "${CONF}" 2>/dev/null | cut -f2 -d'=' | tr -d '\"')).${NC}"
     else
         printf "%s\n" "${RED}Bot chua chay.${NC}"
@@ -130,13 +130,13 @@ WantedBy=multi-user.target
 EOF
 
     chmod +x "${BOT_SCRIPT}"
-    systemctl daemon-reload
-    systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1
-    systemctl restart "${SERVICE_NAME}"
+    _svc daemon-reload
+    _svc enable "${SERVICE_NAME}" >/dev/null 2>&1
+    _svc restart "${SERVICE_NAME}"
     sleep 2
 
     clear
-    if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    if _svc_active "${SERVICE_NAME}"; then
         printf "%s\n" "${GREEN}Bot da chay o che do '${BOT_MODE}'. Kiem tra Telegram, go /help.${NC}"
     else
         printf "%s\n" "${RED}Bot khong khoi dong duoc. Xem log: journalctl -u ${SERVICE_NAME}${NC}"
@@ -144,10 +144,10 @@ EOF
 }
 
 _remove() {
-    systemctl stop "${SERVICE_NAME}" 2>/dev/null
-    systemctl disable "${SERVICE_NAME}" >/dev/null 2>&1
+    _svc stop "${SERVICE_NAME}" 2>/dev/null
+    _svc disable "${SERVICE_NAME}" >/dev/null 2>&1
     rm -f "${SERVICE}" "${CONF}" /var/hostvn/.telegram_bot.offset /var/hostvn/.telegram_bot.state
-    systemctl daemon-reload
+    _svc daemon-reload
     clear
     printf "%s\n" "${GREEN}Da tat va xoa cau hinh Telegram bot.${NC}"
 }
@@ -163,7 +163,7 @@ case "${action}" in
     setup) _setup ;;
     remove) _remove ;;
     restart)
-        systemctl restart "${SERVICE_NAME}" 2>/dev/null; sleep 1; clear; _status ;;
+        _svc restart "${SERVICE_NAME}" 2>/dev/null; sleep 1; clear; _status ;;
     status) clear; _status ;;
     *) clear; printf "%s\n" "${RED}${lang_cancel_action}${NC}" ;;
 esac

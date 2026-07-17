@@ -53,7 +53,7 @@ EOF
     cat >> "$PHP1_CLI_PATH/30-igbinary.ini" << EOF
 extension=igbinary.so
 EOF
-    systemctl restart php"${PHP1_VERSION}"-fpm
+    _svc restart php"${PHP1_VERSION}"-fpm
 }
 
 _install_php1_memcached(){
@@ -83,7 +83,7 @@ EOF
     cat >> "$PHP1_CLI_PATH/40-memcached.ini" << EOF
 extension=memcached.so
 EOF
-    systemctl restart php"${PHP1_VERSION}"-fpm
+    _svc restart php"${PHP1_VERSION}"-fpm
 }
 
 _install_ig_binary_php2(){
@@ -114,7 +114,7 @@ EOF
     cat >> "$PHP2_CLI_PATH/30-igbinary.ini" << EOF
 extension=igbinary.so
 EOF
-    systemctl restart php"${PHP2_VERSION}"-fpm
+    _svc restart php"${PHP2_VERSION}"-fpm
 }
 
 _install_php2_memcached(){
@@ -145,7 +145,7 @@ EOF
     cat >> "$PHP2_CLI_PATH/40-memcached.ini" << EOF
 extension=memcached.so
 EOF
-    systemctl restart php"${PHP2_VERSION}"-fpm
+    _svc restart php"${PHP2_VERSION}"-fpm
 }
 
 mkdir -p "${DIR}"

@@ -3,6 +3,13 @@
 printf "%s\n" "Dang update vui long doi...."
 script_version="1.0.0"
 UPDATE_LINK="${HOSTVN_SCRIPT_LINK:-https://circling5714.github.io/hostvn-script}"
+# HostVN ARM64: lop truu tuong service (_svc)
+if [ -f "/var/hostvn/menu/helpers/environment" ]; then
+    source "/var/hostvn/menu/helpers/environment"
+else
+    _svc(){ [ "$1" = daemon-reload ] && { systemctl daemon-reload; return; }; systemctl "$1" "${2%.service}"; }
+    _svc_active(){ systemctl is-active --quiet "${1%.service}"; }
+fi
 IPADDRESS=$(grep -w "IPADDRESS" "/var/hostvn/ipaddress" | cut -f2 -d'=')
 RAM_TOTAL=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
 
@@ -365,7 +372,7 @@ bantime  = 86400
 END
 fi
 
-systemctl restart fail2ban
+_svc restart fail2ban
 
 check_web_apps_config=$(grep -w "nginx_error" "/etc/nginx/web_apps.conf")
 if [ -n "${check_web_apps_config}" ]; then
@@ -826,9 +833,9 @@ if [[ ! -f /etc/nginx/extra/rocket_nginx.conf && -f /var/hostvn/menu/template/ro
 fi
 
 if nginx -t; then
-    systemctl reload php"${PHP1_VERSION}"-fpm
-    systemctl reload php"${PHP2_VERSION}"-fpm
-    systemctl restart nginx
+    _svc reload php"${PHP1_VERSION}"-fpm
+    _svc reload php"${PHP2_VERSION}"-fpm
+    _svc restart nginx
 fi
 
 if [ -f /var/hostvn/telegram/servicesNotify.sh ]; then
@@ -1089,9 +1096,9 @@ if [ -z "${ssl_cron_exists}" ]; then
     rm -rf auto_ssl
 fi
 
-systemctl restart php"${php1_version}"-fpm
+_svc restart php"${php1_version}"-fpm
 if [ -n "${php2_version}" ]; then
-    systemctl restart php"${php2_version}"-fpm
+    _svc restart php"${php2_version}"-fpm
 fi
 
 # Fix CF config
@@ -1126,7 +1133,7 @@ set_real_ip_from 2a06:98c0::/29;
 set_real_ip_from 2c0f:f248::/32;
 END
 
-systemctl reload nginx
+_svc reload nginx
 
 # Update WP-CLI
 rm -rf /usr/local/bin/wp

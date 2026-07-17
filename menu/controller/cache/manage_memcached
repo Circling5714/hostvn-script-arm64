@@ -51,12 +51,12 @@ while [ "${CHOICE}" != "0" ]; do
         else
             printf "${GREEN}%s${NC}\n" "Dang tien hanh mo Memcached..."
             sleep 2
-            systemctl start memcached
-            systemctl enable memcached
+            _svc start memcached
+            _svc enable memcached
             cron_exists=$(crontab -l | grep -w 'memcached')
             if [ -z "${cron_exists}" ]; then
                 crontab -l >clear_memcached
-                echo "23 */37 * * * systemctl restart memcached >/dev/null 2>&1" >>clear_memcached
+                echo "23 */37 * * * _svc restart memcached >/dev/null 2>&1" >>clear_memcached
                 crontab clear_memcached
                 rm -rf clear_memcached
             fi
@@ -70,8 +70,8 @@ while [ "${CHOICE}" != "0" ]; do
         if service_running "memcached"; then
             printf "${GREEN}%s${NC}\n" "Dang tien hanh tat Memcached..."
             sleep 1
-            systemctl stop memcached
-            systemctl disable memcached
+            _svc stop memcached
+            _svc disable memcached
             cron_exists=$(crontab -l | grep -w 'memcached')
             if [ -n "${cron_exists}" ]; then
                 crontab -u root -l | grep -v "memcached" | crontab -u root -
@@ -88,7 +88,7 @@ while [ "${CHOICE}" != "0" ]; do
     3) cache_install_memcached ;;
     4)
         if [ -f "/etc/memcached.conf" ]; then
-            systemctl stop memcached
+            _svc stop memcached
             apt-get purge --auto-remove memcached -y
             apt autoremove -y
             rm -rf /etc/memcached.conf
@@ -96,7 +96,7 @@ while [ "${CHOICE}" != "0" ]; do
             if [ -n "${cron_exists}" ]; then
                 crontab -u root -l | grep -v "memcached" | crontab -u root -
             fi
-            systemctl daemon-reload
+            _svc daemon-reload
             clear
             printf "${GREEN}%s\n${NC}" "Go bo Memcached thanh cong."
         else

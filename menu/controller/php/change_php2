@@ -101,8 +101,8 @@ _remove_old_php(){
 }
 
 _install_php(){
-    systemctl stop php"${PHP2_VERSION_OLD}"-fpm
-    systemctl disable php"${PHP2_VERSION_OLD}"-fpm
+    _svc stop php"${PHP2_VERSION_OLD}"-fpm
+    _svc disable php"${PHP2_VERSION_OLD}"-fpm
 
     apt -y install php"${PHP2_VERSION_NEW}" php"${PHP2_VERSION_NEW}"-fpm php"${PHP2_VERSION_NEW}"-ldap php"${PHP2_VERSION_NEW}"-zip \
         php"${PHP2_VERSION_NEW}"-cli php"${PHP2_VERSION_NEW}"-mysql php"${PHP2_VERSION_NEW}"-gd php"${PHP2_VERSION_NEW}"-xml \
@@ -131,7 +131,7 @@ _install_php(){
             sed -i '/ProtectKernelTunables=true/a ProtectControlGroups=true' "${php2_service_file_1}"
             sed -i '/ProtectControlGroups=true/a RestrictRealtime=true' "${php2_service_file_1}"
             sed -i '/RestrictRealtime=true/a RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' "${php2_service_file_1}"
-            systemctl daemon-reload
+            _svc daemon-reload
         fi
 
         php2_service_file_2="/lib/systemd/system/php${PHP2_VERSION_NEW}-fpm.service"
@@ -144,7 +144,7 @@ _install_php(){
             sed -i '/ProtectKernelTunables=true/a ProtectControlGroups=true' "${php2_service_file_2}"
             sed -i '/ProtectControlGroups=true/a RestrictRealtime=true' "${php2_service_file_2}"
             sed -i '/RestrictRealtime=true/a RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' "${php2_service_file_2}"
-            systemctl daemon-reload
+            _svc daemon-reload
         fi
 }
 
@@ -446,8 +446,8 @@ _run(){
 
                 _remove_old_php
 
-                systemctl restart php"${PHP2_VERSION_NEW}"-fpm
-                systemctl enable php"${PHP2_VERSION_NEW}"-fpm
+                _svc restart php"${PHP2_VERSION_NEW}"-fpm
+                _svc enable php"${PHP2_VERSION_NEW}"-fpm
                 _write_info
 
                 clear

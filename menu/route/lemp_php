@@ -47,9 +47,9 @@ while [ "${CHOICE}" != "0" ]; do
     fi
     case ${CHOICE} in
     1)
-        systemctl restart php"${php1_version}"-fpm
+        _svc restart php"${php1_version}"-fpm
         if [[ "${php2_release}" == "yes" ]]; then
-            systemctl restart php"${php2_version}"-fpm
+            _svc restart php"${php2_version}"-fpm
         fi
         clear
         printf "%s\n" "${GREEN}Restart PHP successfully.${NC}"

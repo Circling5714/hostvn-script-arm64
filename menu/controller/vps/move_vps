@@ -538,16 +538,16 @@ _run() {
 
                 rm -rf "${NGINX_CONF_DIR}"/ssl/server.bak
 
-                systemctl restart php"${php1_version}"-fpm
+                _svc restart php"${php1_version}"-fpm
                 if [ "${php2_release}" == "yes" ]; then
-                    systemctl restart php"${php2_version}"-fpm
+                    _svc restart php"${php2_version}"-fpm
                 fi
 
                 if nginx -t; then
-                    systemctl reload nginx
+                    _svc reload nginx
                 fi
 
-                systemctl restart mariadb
+                _svc restart mariadb
                 remote_name=${IPADDRESS//[.]/}
                 rclone config delete "${remote_name}"
                 rm -rf /home/move_vps/*

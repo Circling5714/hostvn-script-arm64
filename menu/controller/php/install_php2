@@ -100,7 +100,7 @@ _install_php(){
             sed -i '/ProtectKernelTunables=true/a ProtectControlGroups=true' "${php2_service_file_1}"
             sed -i '/ProtectControlGroups=true/a RestrictRealtime=true' "${php2_service_file_1}"
             sed -i '/RestrictRealtime=true/a RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' "${php2_service_file_1}"
-            systemctl daemon-reload
+            _svc daemon-reload
         fi
 
         php2_service_file_2="/lib/systemd/system/php${PHP2_VERSION}-fpm.service"
@@ -113,7 +113,7 @@ _install_php(){
             sed -i '/ProtectKernelTunables=true/a ProtectControlGroups=true' "${php2_service_file_2}"
             sed -i '/ProtectControlGroups=true/a RestrictRealtime=true' "${php2_service_file_2}"
             sed -i '/RestrictRealtime=true/a RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' "${php2_service_file_2}"
-            systemctl daemon-reload
+            _svc daemon-reload
         fi
 }
 
@@ -362,8 +362,8 @@ _run(){
                 _hostvn_custom_ini
                 _php_opcache
 
-                systemctl restart php"${PHP2_VERSION}"-fpm
-                systemctl enable php"${PHP2_VERSION}"-fpm
+                _svc restart php"${PHP2_VERSION}"-fpm
+                _svc enable php"${PHP2_VERSION}"-fpm
                 _write_info
 
                 clear

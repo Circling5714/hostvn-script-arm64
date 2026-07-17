@@ -1,0 +1,181 @@
+#!/bin/bash
+
+######################################################################
+#      HostVN ARM64 - Environment detection & service abstraction    #
+#                                                                    #
+#  Cho phep HostVN chay tren:                                        #
+#   - VPS/container co systemd (dung systemctl nhu binh thuong)      #
+#   - chroot/Linux Deploy/Android khong systemd (quan ly truc tiep)  #
+######################################################################
+
+# ---------------------------------------------------------------
+# Phat hien moi truong (chay 1 lan, cache qua bien HOSTVN_*)
+# ---------------------------------------------------------------
+_hostvn_detect_env() {
+    HOSTVN_ARCH="$(uname -m 2>/dev/null)"   # aarch64 | x86_64 | armv7l...
+
+    # Init system: coi la systemd chi khi PID1 la systemd VA systemctl dung duoc
+    if command -v systemctl >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ]; then
+        HOSTVN_INIT="systemd"
+    else
+        HOSTVN_INIT="manual"
+    fi
+
+    # Android (Linux Deploy expose /system, mount /sdcard)?
+    if [ -d /system/bin ] || grep -qa '/sdcard' /proc/mounts 2>/dev/null; then
+        HOSTVN_ANDROID="yes"
+    else
+        HOSTVN_ANDROID="no"
+    fi
+
+    # chroot/container?
+    if [ "${HOSTVN_INIT}" = "manual" ] || [ "${HOSTVN_ANDROID}" = "yes" ]; then
+        HOSTVN_CONTAINER="yes"
+    else
+        HOSTVN_CONTAINER="no"
+    fi
+
+    # Firewall (iptables) kha dung? (chroot tren Android thuong khong co netfilter)
+    if command -v iptables >/dev/null 2>&1 && iptables -L -n >/dev/null 2>&1; then
+        HOSTVN_FIREWALL="yes"
+    else
+        HOSTVN_FIREWALL="no"
+    fi
+
+    export HOSTVN_ARCH HOSTVN_INIT HOSTVN_ANDROID HOSTVN_CONTAINER HOSTVN_FIREWALL
+}
+[ -z "${HOSTVN_INIT}" ] && _hostvn_detect_env
+
+# Thu muc luu danh sach service can auto-start (che do manual)
+HOSTVN_AUTOSTART_DIR="/var/hostvn/autostart"
+HOSTVN_RUN_DIR="/var/run/hostvn"
+
+# ---------------------------------------------------------------
+# _svc <action> <service>
+#   action: start|stop|restart|reload|enable|disable|is-active|daemon-reload
+# ---------------------------------------------------------------
+_svc() {
+    local action="$1" svc="$2"
+    svc="${svc%.service}"
+
+    if [ "${HOSTVN_INIT}" = "systemd" ]; then
+        case "${action}" in
+            daemon-reload) systemctl daemon-reload ;;
+            *) systemctl "${action}" "${svc}" ;;
+        esac
+        return $?
+    fi
+
+    # ---------- Che do manual (khong systemd) ----------
+    case "${action}" in
+        daemon-reload) return 0 ;;
+        enable) mkdir -p "${HOSTVN_AUTOSTART_DIR}"; : > "${HOSTVN_AUTOSTART_DIR}/${svc}"; return 0 ;;
+        disable) rm -f "${HOSTVN_AUTOSTART_DIR}/${svc}"; return 0 ;;
+    esac
+
+    _svc_manual "${action}" "${svc}"
+}
+
+# Quan ly service truc tiep khi khong co systemd
+_svc_manual() {
+    local action="$1" svc="$2"
+    mkdir -p "${HOSTVN_RUN_DIR}"
+
+    case "${svc}" in
+        nginx)
+            case "${action}" in
+                start)   [ -x /usr/sbin/nginx ] && /usr/sbin/nginx ;;
+                stop)    /usr/sbin/nginx -s quit 2>/dev/null || pkill -x nginx ;;
+                restart) /usr/sbin/nginx -s quit 2>/dev/null; pkill -x nginx 2>/dev/null; sleep 1; /usr/sbin/nginx ;;
+                reload)  /usr/sbin/nginx -s reload 2>/dev/null || { /usr/sbin/nginx -s quit 2>/dev/null; sleep 1; /usr/sbin/nginx; } ;;
+                is-active) pgrep -x nginx >/dev/null && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
+        php*-fpm)
+            local bin="/usr/sbin/${svc}"
+            [ -x "${bin}" ] || bin="$(command -v "${svc}" 2>/dev/null)"
+            case "${action}" in
+                start)   [ -x "${bin}" ] && "${bin}" ;;
+                stop)    pkill -f "${svc}: master" 2>/dev/null || pkill -f "${bin}" ;;
+                restart) pkill -f "${svc}: master" 2>/dev/null; pkill -f "${bin}" 2>/dev/null; sleep 1; [ -x "${bin}" ] && "${bin}" ;;
+                reload)  pkill -USR2 -f "${svc}: master" 2>/dev/null || { pkill -f "${bin}" 2>/dev/null; sleep 1; "${bin}"; } ;;
+                is-active) pgrep -f "${svc}: master" >/dev/null && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
+        mariadb|mysql|mysqld)
+            case "${action}" in
+                start)   mkdir -p /run/mysqld; chown mysql:mysql /run/mysqld 2>/dev/null; setsid mysqld_safe --skip-syslog >/dev/null 2>&1 < /dev/null & sleep 3 ;;
+                stop)    mysqladmin shutdown 2>/dev/null || pkill -x mariadbd || pkill -x mysqld ;;
+                restart) { mysqladmin shutdown 2>/dev/null || pkill -x mariadbd 2>/dev/null || pkill -x mysqld 2>/dev/null; }; sleep 2; mkdir -p /run/mysqld; chown mysql:mysql /run/mysqld 2>/dev/null; setsid mysqld_safe --skip-syslog >/dev/null 2>&1 < /dev/null & sleep 3 ;;
+                reload)  mysqladmin reload 2>/dev/null || mysqladmin flush-privileges 2>/dev/null ;;
+                is-active) { pgrep -x mariadbd >/dev/null || pgrep -x mysqld >/dev/null; } && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
+        redis*|redis-server)
+            case "${action}" in
+                start)   redis-server /etc/redis/redis.conf 2>/dev/null || redis-server --daemonize yes ;;
+                stop)    redis-cli shutdown nosave 2>/dev/null || pkill -x redis-server ;;
+                restart) { redis-cli shutdown nosave 2>/dev/null || pkill -x redis-server 2>/dev/null; }; sleep 1; redis-server /etc/redis/redis.conf 2>/dev/null || redis-server --daemonize yes ;;
+                reload)  : ;;
+                is-active) pgrep -x redis-server >/dev/null && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
+        memcached)
+            case "${action}" in
+                start)   [ -x /usr/bin/memcached ] && setsid /usr/bin/memcached -d -u nobody 2>/dev/null < /dev/null & ;;
+                stop)    pkill -x memcached ;;
+                restart) pkill -x memcached 2>/dev/null; sleep 1; setsid /usr/bin/memcached -d -u nobody 2>/dev/null < /dev/null & ;;
+                is-active) pgrep -x memcached >/dev/null && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
+        fail2ban)
+            case "${action}" in
+                start)   fail2ban-client start 2>/dev/null ;;
+                stop)    fail2ban-client stop 2>/dev/null ;;
+                restart) fail2ban-client reload 2>/dev/null || { fail2ban-client stop 2>/dev/null; sleep 1; fail2ban-client start 2>/dev/null; } ;;
+                reload)  fail2ban-client reload 2>/dev/null ;;
+                is-active) fail2ban-client ping >/dev/null 2>&1 && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
+        cron|crond)
+            case "${action}" in
+                start|restart) pkill -x cron 2>/dev/null; sleep 1; cron 2>/dev/null || /usr/sbin/cron 2>/dev/null ;;
+                stop)    pkill -x cron ;;
+                is-active) pgrep -x cron >/dev/null && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
+        cloudflared)
+            # cloudflared quan ly rieng qua token; o day chi start/stop tien trinh
+            case "${action}" in
+                start|restart) pkill -x cloudflared 2>/dev/null; sleep 1; [ -n "${TUNNEL_TOKEN}" ] && setsid cloudflared tunnel run --token "${TUNNEL_TOKEN}" >/dev/null 2>&1 < /dev/null & ;;
+                stop)    pkill -x cloudflared ;;
+                is-active) pgrep -x cloudflared >/dev/null && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
+        supervisor|supervisord)
+            case "${action}" in
+                start|restart) pkill -x supervisord 2>/dev/null; sleep 1; supervisord -c /etc/supervisor/supervisord.conf 2>/dev/null ;;
+                stop)    pkill -x supervisord ;;
+                is-active) pgrep -x supervisord >/dev/null && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
+        ufw|clamav-freshclam|clamav-daemon)
+            # Cac service khong quan trong / khong kha dung trong chroot: bo qua nhe nhang
+            case "${action}" in
+                is-active) echo inactive; return 3 ;;
+                *) return 0 ;;
+            esac ;;
+
+        *)
+            # Fallback: thu 'service' neu co init.d script
+            if command -v service >/dev/null 2>&1; then
+                service "${svc}" "${action}" 2>/dev/null && return 0
+            fi
+            return 0 ;;
+    esac
+}
+
+# Tien ich: kiem tra service dang chay (thay cho '_svc is-active --quiet')
+_svc_active() {
+    [ "$(_svc is-active "$1" 2>/dev/null)" = "active" ]
+}

@@ -48,7 +48,7 @@ _run(){
 IPADDRESS="${new_ip}"
 EOchange_ip
     if nginx -t; then
-        systemctl reload nginx
+        _svc reload nginx
         clear
         printf "%s\n" "${GREEN}Doi IP VPS thanh cong.${NC}"
         printf "%s\n" "${GREEN}Vui long thoat menu va mo lai de thay doi co hieu luc.${NC}"

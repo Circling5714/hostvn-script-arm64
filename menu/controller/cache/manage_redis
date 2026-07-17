@@ -51,12 +51,12 @@ while [ "${CHOICE}" != "0" ]; do
         else
             printf "%s\n" "${GREEN}Dang tien hanh mo Redis Cache...${NC}"
             sleep 1
-            systemctl enable redis.service
-            systemctl start redis.service
+            _svc enable redis.service
+            _svc start redis.service
             cron_exists=$(crontab -l | grep -w 'redis')
             if [ -z "${cron_exists}" ]; then
                 crontab -l >clear_redis
-                echo "23 */38 * * * systemctl restart redis >/dev/null 2>&1" >>clear_redis
+                echo "23 */38 * * * _svc restart redis >/dev/null 2>&1" >>clear_redis
                 crontab clear_redis
                 rm -rf clear_redis
             fi
@@ -69,8 +69,8 @@ while [ "${CHOICE}" != "0" ]; do
         if service_running "redis"; then
             printf "%s\n" "${GREEN}Dang tien hanh tat Redis Cache...${NC}"
             sleep 1
-            systemctl stop redis.service
-            systemctl disable redis.service
+            _svc stop redis.service
+            _svc disable redis.service
             cron_exists=$(crontab -l | grep -w 'redis')
             if [ -n "${cron_exists}" ]; then
                 crontab -u root -l | grep -v "redis" | crontab -u root -
@@ -87,7 +87,7 @@ while [ "${CHOICE}" != "0" ]; do
     3) cache_install_redis ;;
     4)
         if [ -f "/lib/systemd/system/redis-server.service" ]; then
-            systemctl stop redis
+            _svc stop redis
             apt-get purge --auto-remove redis-server -y
             apt autoremove -y
             rm -rf /etc/redis
@@ -95,7 +95,7 @@ while [ "${CHOICE}" != "0" ]; do
             if [ -n "${cron_exists}" ]; then
                 crontab -u root -l | grep -v "redis" | crontab -u root -
             fi
-            systemctl daemon-reload
+            _svc daemon-reload
             clear
             printf "${GREEN}%s\n${NC}" "Go bo Redis thanh cong."
         else

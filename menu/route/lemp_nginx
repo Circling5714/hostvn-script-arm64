@@ -98,7 +98,7 @@ while [ "${CHOICE}" != "0" ]; do
         printf "%s\n" "${RED}${PROCESSING}${NC}"
         sleep 1
         if nginx -t; then
-            systemctl restart nginx
+            _svc restart nginx
             clear
             printf "%s\n" "${GREEN}${lang_restart_nginx_success}${NC}"
             sleep 1
@@ -125,7 +125,7 @@ while [ "${CHOICE}" != "0" ]; do
         if [[ -n "$NGINX_NEW_VERSION" && "$NGINX_NEW_VERSION" != "$NGINX_CURRENT_VERSION" ]]; then
             _build_nginx "${NGINX_NEW_VERSION}"
             if nginx -t; then
-                systemctl restart nginx
+                _svc restart nginx
                 clear
                 printf "%s\n" "${GREEN}Update Nginx successful.${NC}"
             else
@@ -233,7 +233,7 @@ http {
 EONGINXCONF
 
         if nginx -t; then
-            systemctl restart nginx
+            _svc restart nginx
             clear
             printf "%s\n" "${GREEN}Rebuild Nginx successful.${NC}"
         else

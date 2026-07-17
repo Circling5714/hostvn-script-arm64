@@ -12,6 +12,8 @@
 
 source /var/hostvn/.hostvn.conf
 source /var/hostvn/menu/validate/rule
+# HostVN ARM64: lop truu tuong service (_svc) + phat hien moi truong
+source /var/hostvn/menu/helpers/environment
 
 _cd_dir(){
     cd "$1" || exit
@@ -285,9 +287,9 @@ _select_remote(){
 }
 
 _restart_service(){
-    systemctl restart nginx
-    systemctl restart php"${php1_version}"-fpm
+    _svc restart nginx
+    _svc restart php"${php1_version}"-fpm
     if [ "${php2_release}" == "yes" ]; then
-        systemctl restart php"${php2_version}"-fpm
+        _svc restart php"${php2_version}"-fpm
     fi
 }

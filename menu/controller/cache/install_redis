@@ -44,8 +44,8 @@ _install_redis(){
 
     sed -i "s|# maxmemory <bytes>|maxmemory ${MAX_MEMORY}mb|g" /etc/redis/redis.conf
     sed -i "s|# maxmemory-policy noeviction|maxmemory-policy allkeys-lru|g" /etc/redis/redis.conf
-    systemctl restart redis
-    systemctl enable redis
+    _svc restart redis
+    _svc enable redis
 
     _restart_service
 
@@ -53,7 +53,7 @@ _install_redis(){
         cron_exists=$(crontab -l | grep -w 'redis')
         if [ -z "${cron_exists}" ]; then
             crontab -l > clear_redis
-            echo "23 */37 * * * systemctl restart redis >/dev/null 2>&1" >> clear_redis
+            echo "23 */37 * * * _svc restart redis >/dev/null 2>&1" >> clear_redis
             crontab clear_redis
             rm -rf clear_redis
         fi

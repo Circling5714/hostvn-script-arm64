@@ -26,6 +26,14 @@ DIR=$(pwd)
 SCRIPT_LINK="${HOSTVN_SCRIPT_LINK:-https://circling5714.github.io/hostvn-script}"
 LOCAL_DIR="${HOSTVN_LOCAL_DIR}"
 
+# HostVN ARM64: lop truu tuong service (_svc) - chay ca khi khong co systemd
+if [ -f "${LOCAL_DIR}/menu/helpers/environment" ]; then
+    source "${LOCAL_DIR}/menu/helpers/environment"
+else
+    _svc(){ [ "$1" = daemon-reload ] && { systemctl daemon-reload; return; }; systemctl "$1" "${2%.service}"; }
+    _svc_active(){ systemctl is-active --quiet "${1%.service}"; }
+fi
+
 welcome(){
     clear
     printf "========================================================\n"
@@ -93,13 +101,13 @@ install_requirement(){
         libyajl-dev apt-utils htop nano supervisor bc libmaxminddb-dev psmisc -y
 
     service supervisor stop
-    systemctl disable supervisor
+    _svc disable supervisor
 }
 
 create_swap(){
     # Trong container (Proxmox LXC, Docker...) khong the swapon,
     # swap phai duoc cau hinh tren host
-    if systemd-detect-virt --container >/dev/null 2>&1; then
+    if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
         echo "Phat hien moi truong container (LXC/Docker). Bo qua buoc tao swap."
         echo "Vui long cau hinh swap cho container tren host (VD: Proxmox > Resources > Swap)."
         return

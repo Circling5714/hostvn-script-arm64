@@ -33,6 +33,16 @@ LOCAL_DIR="${HOSTVN_LOCAL_DIR}"
 FILE_INFO="${BASH_DIR}/.hostvn.conf"
 HOSTNAME=$(hostname)
 PHP2_RELEASE="no"
+
+# HostVN ARM64: nap lop truu tuong service (_svc) - chay ca khi khong co systemd
+if [ -f "${LOCAL_DIR}/menu/helpers/environment" ]; then
+    source "${LOCAL_DIR}/menu/helpers/environment"
+elif [ -f "/var/hostvn/menu/helpers/environment" ]; then
+    source "/var/hostvn/menu/helpers/environment"
+else
+    _svc(){ [ "$1" = daemon-reload ] && { systemctl daemon-reload; return; }; systemctl "$1" "${2%.service}"; }
+    _svc_active(){ systemctl is-active --quiet "${1%.service}"; }
+fi
 OS_VER=$(grep "^VERSION_ID=" "/etc/os-release" | cut -f2 -d'=' | cut -f2 -d'"')
 UBUNTU_CODENAME=$(lsb_release -cs 2>/dev/null || grep "^VERSION_CODENAME=" "/etc/os-release" | cut -f2 -d'=')
 
@@ -381,8 +391,8 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOnginx_service
 
-    sudo systemctl enable nginx.service
-    sudo systemctl start nginx.service
+    _svc enable nginx.service
+    _svc start nginx.service
     cd_dir "${DIR}"
 }
 
@@ -451,7 +461,7 @@ install_php() {
         sed -i '/ProtectKernelTunables=true/a ProtectControlGroups=true' /usr/lib/systemd/system/php"${PHP_VERSION}"-fpm.service
         sed -i '/ProtectControlGroups=true/a RestrictRealtime=true' /usr/lib/systemd/system/php"${PHP_VERSION}"-fpm.service
         sed -i '/RestrictRealtime=true/a RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' /usr/lib/systemd/system/php"${PHP_VERSION}"-fpm.service
-        systemctl daemon-reload
+        _svc daemon-reload
     fi
 
     if [[ -f "/lib/systemd/system/php${PHP_VERSION}-fpm.service" && ! -f "/usr/lib/systemd/system/php${PHP_VERSION}-fpm.service" ]]; then
@@ -463,7 +473,7 @@ install_php() {
         sed -i '/ProtectKernelTunables=true/a ProtectControlGroups=true' /lib/systemd/system/php"${PHP_VERSION}"-fpm.service
         sed -i '/ProtectControlGroups=true/a RestrictRealtime=true' /lib/systemd/system/php"${PHP_VERSION}"-fpm.service
         sed -i '/RestrictRealtime=true/a RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' /lib/systemd/system/php"${PHP_VERSION}"-fpm.service
-        systemctl daemon-reload
+        _svc daemon-reload
     fi
 
     update-alternatives --set php /usr/bin/php"${PHP_VERSION}"
@@ -497,7 +507,7 @@ install_php_2() {
         sed -i '/ProtectKernelTunables=true/a ProtectControlGroups=true' /usr/lib/systemd/system/php"${PHP_VERSION_2}"-fpm.service
         sed -i '/ProtectControlGroups=true/a RestrictRealtime=true' /usr/lib/systemd/system/php"${PHP_VERSION_2}"-fpm.service
         sed -i '/RestrictRealtime=true/a RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' /usr/lib/systemd/system/php"${PHP_VERSION_2}"-fpm.service
-        systemctl daemon-reload
+        _svc daemon-reload
     fi
 
     if [[ -f "/lib/systemd/system/php${PHP_VERSION_2}-fpm.service" && ! -f "/usr/lib/systemd/system/php${PHP_VERSION_2}-fpm.service" ]]; then
@@ -509,7 +519,7 @@ install_php_2() {
         sed -i '/ProtectKernelTunables=true/a ProtectControlGroups=true' /lib/systemd/system/php"${PHP_VERSION_2}"-fpm.service
         sed -i '/ProtectControlGroups=true/a RestrictRealtime=true' /lib/systemd/system/php"${PHP_VERSION_2}"-fpm.service
         sed -i '/RestrictRealtime=true/a RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' /lib/systemd/system/php"${PHP_VERSION_2}"-fpm.service
-        systemctl daemon-reload
+        _svc daemon-reload
     fi
 }
 
@@ -2624,15 +2634,15 @@ EOmy_cnf
 
     # Trong container (Proxmox LXC...) io_uring/native AIO thuong bi seccomp chan
     # khien MariaDB khong khoi dong duoc -> tat native AIO
-    if systemd-detect-virt --container >/dev/null 2>&1; then
+    if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
         sed -i '/# innodb settings/a innodb_use_native_aio = 0' /etc/mysql/my.cnf
     fi
 
     sql_root_pass=$(gen_pass)
     sql_admin_pass=$(gen_pass)
 
-    systemctl start mariadb
-    systemctl enable mariadb
+    _svc start mariadb
+    _svc enable mariadb
 
     # Thay the mysql_secure_installation (prompt thay doi giua cac phien ban MariaDB).
     # Root van dang nhap duoc qua unix_socket (khong can mat khau khi la user root he thong)
@@ -2654,13 +2664,13 @@ EOsecure_sql
     if [ -f "/usr/lib/systemd/system/mariadb.service" ]; then
         sed -i "s/LimitNOFILE=.*/LimitNOFILE=655350/g" /usr/lib/systemd/system/mariadb.service
         sed -i "s/PrivateTmp=false/PrivateTmp=true/g" /usr/lib/systemd/system/mariadb.service
-        systemctl daemon-reload
+        _svc daemon-reload
     fi
 
     if [[ -f "/lib/systemd/system/mariadb.service" && ! -f "/usr/lib/systemd/system/mariadb.service" ]]; then
         sed -i "s/LimitNOFILE=.*/LimitNOFILE=655350/g" /lib/systemd/system/mariadb.service
         sed -i "s/PrivateTmp=false/PrivateTmp=true/g" /lib/systemd/system/mariadb.service
-        systemctl daemon-reload
+        _svc daemon-reload
     fi
 }
 
@@ -2718,7 +2728,7 @@ install_wp_cli_packages() {
     echo "memory_limit = -1" >>"$PHP1_INI_PATH"/00-hostvn-custom.ini
     echo "memory_limit = -1" >>"$PHP1_CLI_PATH"/00-hostvn-custom.ini
 
-    systemctl restart php"${PHP_VERSION}"-fpm
+    _svc restart php"${PHP_VERSION}"-fpm
 
     wp package install iandunn/wp-cli-rename-db-prefix --allow-root
     wp package install trepmal/wp-revisions-cli --allow-root
@@ -2733,7 +2743,7 @@ install_wp_cli_packages() {
 #    echo "allow_url_fopen = Off" >> "$PHP1_INI_PATH"/00-hostvn-custom.ini
 #    echo "allow_url_fopen = Off" >> "$PHP1_CLI_PATH"/00-hostvn-custom.ini
 
-    systemctl restart php"${PHP_VERSION}"-fpm
+    _svc restart php"${PHP_VERSION}"-fpm
 }
 
 ############################################
@@ -3251,8 +3261,8 @@ maxretry = 2
 bantime  = 86400
 END
 
-    systemctl start fail2ban
-    systemctl enable fail2ban
+    _svc start fail2ban
+    _svc enable fail2ban
 }
 
 ############################################
@@ -3339,8 +3349,13 @@ END
 }
 
 open_port() {
-    systemctl start ufw
-    systemctl enable ufw
+    # chroot/Android thuong khong co netfilter -> ufw khong dung duoc, bo qua an toan
+    if [ "${HOSTVN_FIREWALL}" != "yes" ]; then
+        printf "%s\n" "Bo qua cau hinh firewall (moi truong nay khong co iptables/netfilter)."
+        return
+    fi
+    _svc start ufw
+    _svc enable ufw
     ufw enable << EOF
 y
 EOF
@@ -3370,13 +3385,13 @@ EOF
         ufw allow 8282/tcp
     fi
 
-    systemctl restart ufw
+    _svc restart ufw
 }
 
 kernel_tweak(){
     # Trong container (Proxmox LXC, Docker...) sysctl kernel/net do host quan ly,
     # ghi vao se bao loi Permission denied hang loat
-    if systemd-detect-virt --container >/dev/null 2>&1; then
+    if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
         printf "%s\n" "Phat hien moi truong container (LXC/Docker). Bo qua kernel tweak (sysctl do host quan ly)."
         return
     fi
@@ -3655,7 +3670,7 @@ if [[ "${MULTI_PHP}" =~ ^(Y|y)$ ]]; then
     php2_global_config
     hostvn_custom_ini_2
     php_2_opcache
-    systemctl enable php"${PHP_VERSION_2}"-fpm
+    _svc enable php"${PHP_VERSION_2}"-fpm
 fi
 
 create_nginx_conf
@@ -3669,7 +3684,7 @@ default_error_page
 wp_rocket_nginx
 php_global_config
 
-systemctl enable php"${PHP_VERSION}"-fpm
+_svc enable php"${PHP_VERSION}"-fpm
 
 hostvn_custom_ini
 php_opcache
@@ -3722,5 +3737,12 @@ printf "${RED}%s${NC}\n" "Muon an IP VPS, dua moi website qua Cloudflare Tunnel 
 printf "${RED}%s${NC}\n" "Bat NGAY sau khi cai (khi chua them website): hostvn > Quan ly VPS > 11. Cloudflare Tunnel"
 printf "=========================================================================\n"
 
-sleep 3
-shutdown -r now
+# Trong container/chroot (Android, LXC...) khong reboot duoc va khong can;
+# cac service da chay qua _svc. Chi reboot tren may that.
+if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
+    printf "${RED}%s${NC}\n" "Moi truong container - khong reboot. Cai dat da hoan tat."
+    printf "%s\n" "Cac dich vu (nginx/mariadb/php-fpm) da duoc khoi dong. Go 'hostvn' de mo menu."
+else
+    sleep 3
+    shutdown -r now
+fi

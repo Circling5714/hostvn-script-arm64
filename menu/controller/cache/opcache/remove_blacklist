@@ -15,11 +15,11 @@ source /var/hostvn/menu/helpers/function
 
 _run(){
     sed -i "/${domain}/d" /etc/php/"${php1_version}"/fpm/conf.d/opcache-default.blacklist
-    systemctl restart php"${php1_version}"-fpm
+    _svc restart php"${php1_version}"-fpm
 
     if [ "${php2_release}" == "yes" ]; then
         sed -i "/${domain}/d" /etc/php/"${php2_version}"/fpm/conf.d/opcache-default.blacklist
-        systemctl restart php"${php2_version}"-fpm
+        _svc restart php"${php2_version}"-fpm
     fi
 
     clear

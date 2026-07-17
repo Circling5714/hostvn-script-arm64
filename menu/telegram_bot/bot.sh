@@ -77,7 +77,16 @@ _help_text() {
 }
 
 _php_fpm_unit() {
-    systemctl list-units --type=service --all 2>/dev/null | grep -oE 'php[0-9.]+-fpm.service' | head -1
+    # Uu tien systemd, fallback: do tu thu muc /etc/php (chay ca khi khong co systemd)
+    if command -v systemctl >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ]; then
+        systemctl list-units --type=service --all 2>/dev/null | grep -oE 'php[0-9.]+-fpm.service' | head -1
+    else
+        for d in /etc/php/*/fpm; do
+            [ -d "$d" ] || continue
+            v=$(basename "$(dirname "$d")")
+            echo "php${v}-fpm"; break
+        done
+    fi
 }
 
 _status_text() {
@@ -85,9 +94,9 @@ _status_text() {
     echo "=== HOSTVN Server ===
 Host: $(hostname)
 Uptime: $(uptime -p 2>/dev/null)
-Nginx: $(systemctl is-active nginx 2>/dev/null)
-MariaDB: $(systemctl is-active mariadb 2>/dev/null)
-PHP-FPM: $(systemctl is-active "${php_unit}" 2>/dev/null)
+Nginx: $(_svc is-active nginx 2>/dev/null)
+MariaDB: $(_svc is-active mariadb 2>/dev/null)
+PHP-FPM: $(_svc is-active "${php_unit}" 2>/dev/null)
 --- Disk ---
 $(df -h / | tail -1 | awk '{print $3" / "$2" ("$5")"}')
 --- RAM ---
@@ -106,22 +115,22 @@ _handle() {
         /status)   tg_send "${chat}" "$(_status_text)" ;;
         /services)
             local php_unit; php_unit=$(_php_fpm_unit)
-            tg_send "${chat}" "Nginx: $(systemctl is-active nginx)
-MariaDB: $(systemctl is-active mariadb)
-${php_unit}: $(systemctl is-active "${php_unit}")" ;;
+            tg_send "${chat}" "Nginx: $(_svc is-active nginx)
+MariaDB: $(_svc is-active mariadb)
+${php_unit}: $(_svc is-active "${php_unit}")" ;;
         /disk)   tg_send "${chat}" "$(df -h / | sed -n '1,2p')" ;;
         /ram)    tg_send "${chat}" "$(free -h)" ;;
         /uptime) tg_send "${chat}" "$(uptime)" ;;
         /restart_nginx)
             [[ "${BOT_MODE}" == "notify" ]] && { tg_send "${chat}" "Che do notify khong cho phep dieu khien."; return; }
-            systemctl restart nginx && tg_send "${chat}" "Da restart Nginx: $(systemctl is-active nginx)" ;;
+            _svc restart nginx && tg_send "${chat}" "Da restart Nginx: $(_svc is-active nginx)" ;;
         /restart_php)
             [[ "${BOT_MODE}" == "notify" ]] && { tg_send "${chat}" "Che do notify khong cho phep dieu khien."; return; }
             local php_unit; php_unit=$(_php_fpm_unit)
-            systemctl restart "${php_unit}" && tg_send "${chat}" "Da restart ${php_unit}: $(systemctl is-active "${php_unit}")" ;;
+            _svc restart "${php_unit}" && tg_send "${chat}" "Da restart ${php_unit}: $(_svc is-active "${php_unit}")" ;;
         /restart_mariadb)
             [[ "${BOT_MODE}" == "notify" ]] && { tg_send "${chat}" "Che do notify khong cho phep dieu khien."; return; }
-            systemctl restart mariadb && tg_send "${chat}" "Da restart MariaDB: $(systemctl is-active mariadb)" ;;
+            _svc restart mariadb && tg_send "${chat}" "Da restart MariaDB: $(_svc is-active mariadb)" ;;
         /reboot)
             [[ "${BOT_MODE}" == "notify" ]] && { tg_send "${chat}" "Che do notify khong cho phep dieu khien."; return; }
             tg_send "${chat}" "Xac nhan khoi dong lai server? Gui /reboot_yes trong 60 giay." ;;
@@ -150,7 +159,7 @@ _monitor_loop() {
         local php_unit; php_unit=$(_php_fpm_unit)
         for svc in nginx mariadb "${php_unit}"; do
             [ -z "${svc}" ] && continue
-            if [ "$(systemctl is-active "${svc}" 2>/dev/null)" != "active" ]; then
+            if [ "$(_svc is-active "${svc}" 2>/dev/null)" != "active" ]; then
                 if [ -z "${svc_down[$svc]}" ]; then
                     _broadcast "CANH BAO: dich vu ${svc} KHONG hoat dong tren $(hostname)."
                     svc_down[$svc]=1

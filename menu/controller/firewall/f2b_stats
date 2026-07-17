@@ -17,7 +17,7 @@ source /var/hostvn/menu/helpers/function
 
 clear
 
-if ! systemctl is-active --quiet fail2ban; then
+if ! _svc_active fail2ban; then
     printf "%s\n" "${RED}Fail2ban khong hoat dong.${NC}"
     read -r -p "Nhan Enter de quay lai..." _
     menu_firewall

@@ -61,11 +61,11 @@ bantime  = 86400
 END
 fi
 
-systemctl restart fail2ban
+_svc restart fail2ban
 sleep 2
 
 clear
-if systemctl is-active --quiet fail2ban; then
+if _svc_active fail2ban; then
     printf "%s\n" "${GREEN}Da bat cac jail tang cuong. Danh sach jail dang chay:${NC}"
     fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*Jail list:\s*//'
 else

@@ -71,8 +71,8 @@ _change_port(){
     ufw allow "${port_new}"/tcp
     ufw delete allow "${current_port}"
 
-    systemctl restart sshd
-    systemctl restart ufw
+    _svc restart sshd
+    _svc restart ufw
 
     rm -rf /etc/fail2ban/jail.local
     if [ -f "${CUSTOM_DIR}/fail2ban/jail.local" ]; then
@@ -86,7 +86,7 @@ _change_port(){
     sed -i "s/ADMIN_PORT/${admin_port}/g" /etc/fail2ban/jail.local
     sed -i "s/ADMIN_EMAIL/${admin_email}/g" /etc/fail2ban/jail.local
     sed -i "s/${current_port}/${port_new}/g" /etc/fail2ban/jail.d/sshd.local
-    systemctl restart fail2ban
+    _svc restart fail2ban
 
     clear
     printf "%s%s%s\n" "${GREEN}" "Da thay đoi Port SSH sang ${port_new} thanh cong." "${NC}"

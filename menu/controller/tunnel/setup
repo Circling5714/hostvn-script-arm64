@@ -60,7 +60,7 @@ _fail2ban_safety() {
     if [ -f /etc/fail2ban/jail.d/defaults.conf ] && ! grep -q "ignoreip.*127.0.0.1" /etc/fail2ban/jail.d/defaults.conf; then
         sed -i '/^\[DEFAULT\]/a ignoreip = 127.0.0.1/8 ::1' /etc/fail2ban/jail.d/defaults.conf
     fi
-    systemctl restart fail2ban >/dev/null 2>&1
+    _svc restart fail2ban >/dev/null 2>&1
 }
 
 _close_inbound_web() {
@@ -146,8 +146,8 @@ EOF
 
     # Chay cloudflared bang tunnel token (systemd)
     cloudflared service install "${tunnel_token}" >/dev/null 2>&1
-    systemctl enable cloudflared >/dev/null 2>&1
-    systemctl restart cloudflared >/dev/null 2>&1
+    _svc enable cloudflared >/dev/null 2>&1
+    _svc restart cloudflared >/dev/null 2>&1
 
     # Cau hinh nginx nhan dien IP that + an toan fail2ban
     _config_real_ip
@@ -163,11 +163,11 @@ EOF
     # Dong 80/443 (moi web qua tunnel)
     _close_inbound_web
 
-    nginx -t >/dev/null 2>&1 && systemctl reload nginx
+    nginx -t >/dev/null 2>&1 && _svc reload nginx
     sleep 2
 
     clear
-    if systemctl is-active --quiet cloudflared; then
+    if _svc_active cloudflared; then
         printf "%s\n" "${GREEN}Da bat Cloudflare Tunnel thanh cong.${NC}"
         printf "%s\n" "${GREEN}Tunnel ID: ${tunnel_id}${NC}"
         printf "%s\n" "${GREEN}- Website moi se tu dong tao DNS tro vao tunnel khi them domain.${NC}"
@@ -183,8 +183,8 @@ EOF
 }
 
 _disable() {
-    systemctl stop cloudflared >/dev/null 2>&1
-    systemctl disable cloudflared >/dev/null 2>&1
+    _svc stop cloudflared >/dev/null 2>&1
+    _svc disable cloudflared >/dev/null 2>&1
     cloudflared service uninstall >/dev/null 2>&1
     rm -f "${CONF}"
     sed -i '/network_mode=/d' "${FILE_INFO}"
@@ -216,7 +216,7 @@ EOF
         ufw allow https >/dev/null 2>&1
         ufw allow 443/udp >/dev/null 2>&1
     fi
-    nginx -t >/dev/null 2>&1 && systemctl reload nginx
+    nginx -t >/dev/null 2>&1 && _svc reload nginx
     clear
     printf "%s\n" "${GREEN}Da tat Cloudflare Tunnel, tro ve che do Direct.${NC}"
     printf "%s\n" "${RED}Luu y: cac website can tro DNS (A record) ve IP VPS va cap lai SSL.${NC}"
@@ -230,7 +230,7 @@ _status() {
         # shellcheck disable=SC1090
         source "${CONF}"
         printf "%s\n" "${GREEN}Tunnel ID: ${CF_TUNNEL_ID}${NC}"
-        printf "%s\n" "cloudflared: $(systemctl is-active cloudflared 2>/dev/null)"
+        printf "%s\n" "cloudflared: $(_svc is-active cloudflared 2>/dev/null)"
     fi
 }
 
