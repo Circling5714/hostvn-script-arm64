@@ -11,7 +11,7 @@
 |---|---|
 | Repo gốc | https://github.com/f97-26082023/hostvn (fork của HOSTVN Script — Sanvv/HOSTVN) |
 | Repo mới | https://github.com/Circling5714/hostvn-script |
-| Link phân phối (GitHub Pages) | https://circling5714.github.io/hostvn-script |
+| Link phân phối (GitHub Pages) | https://circling5714.github.io/hostvn-script-arm64 |
 | Quy mô code | 206 file, ~31.500 dòng Bash |
 | Bản gốc hỗ trợ | Ubuntu 18.04 / 20.04, Debian 10 |
 | Bản rebuild hỗ trợ | **Ubuntu 22.04 / 24.04 / 26.04 LTS** (26.04 experimental) + **Proxmox LXC** |
@@ -164,7 +164,7 @@ apt update && apt install git -y
 git clone https://github.com/Circling5714/hostvn-script.git && cd hostvn-script && bash install
 
 # Cách 2: online qua Pages
-wget https://circling5714.github.io/hostvn-script/install && bash install
+wget https://circling5714.github.io/hostvn-script-arm64/install && bash install
 ```
 
 ## 9. Quy trình phát triển (cho lần sửa sau)

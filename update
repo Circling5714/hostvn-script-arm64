@@ -2,7 +2,7 @@
 
 printf "%s\n" "Dang update vui long doi...."
 script_version="1.0.0"
-UPDATE_LINK="${HOSTVN_SCRIPT_LINK:-https://circling5714.github.io/hostvn-script}"
+UPDATE_LINK="${HOSTVN_SCRIPT_LINK:-https://circling5714.github.io/hostvn-script-arm64}"
 # HostVN ARM64: lop truu tuong service (_svc)
 if [ -f "/var/hostvn/menu/helpers/environment" ]; then
     source "/var/hostvn/menu/helpers/environment"
