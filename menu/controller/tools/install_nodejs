@@ -1,0 +1,38 @@
+#!/bin/bash
+
+######################################################################
+#           Auto Install & Optimize LEMP Stack on Ubuntu             #
+#                                                                    #
+#                Author: Sanvv - HOSTVN Technical                    #
+#                  Website: https://hostvn.vn                        #
+#                                                                    #
+#              Please do not remove copyright. Thank!                #
+#  Please do not copy under any circumstance for commercial reason!  #
+######################################################################
+
+_run(){
+    clear
+    echo "node.js & npm installation..."
+    sleep 3
+
+    # NodeSource dung repo "nodistro" chung cho moi phien ban Ubuntu/Debian
+    NODE_MAJOR=22
+    apt-get install -y ca-certificates curl gnupg
+    mkdir -p /etc/apt/keyrings
+    rm -f /etc/apt/keyrings/nodesource.gpg
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+
+    apt-get update -y
+    apt-get install -y nodejs
+
+    clear
+    if command -v node >/dev/null 2>&1; then
+        printf "%s\n" "${GREEN}node.js $(node -v) & npm $(npm -v): OK!${NC}"
+    else
+        printf "%s\n" "${RED}Cai dat node.js that bai.${NC}"
+    fi
+}
+
+_run
+menu_tools

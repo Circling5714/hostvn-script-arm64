@@ -1,0 +1,16 @@
+script_version=1.0.0
+igbinary_version=3.2.16
+php_memcached_version=3.4.0
+php_redis_version=6.3.0
+phpmyadmin_version=5.2.3
+phpmyadmin4_version=4.9.11
+phpsysinfo_version=3.4.2
+mariadb_version=11.8
+php_version=php84
+php2_version=php82
+nginx_version=1.30.4
+ngx_cache_purge_version=2.5.6
+more_clear_headers_v=0.40
+nginx_module_vts_v=0.2.5
+php_list=php8.4 php8.3 php8.2 php7.4
+list_plugins=really-simple-ssl wps-hide-login wps-limit-login seo-by-rank-mat

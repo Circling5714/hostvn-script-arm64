@@ -1,0 +1,189 @@
+#!/bin/bash
+
+######################################################################
+#           Auto Install & Optimize LEMP Stack on Ubuntu             #
+#                                                                    #
+#                Author: Sanvv - HOSTVN Technical                    #
+#                  Website: https://hostvn.vn                        #
+#                                                                    #
+#          Rebuild for Ubuntu 22.04 / 24.04 / 26.04 LTS              #
+#              Please do not remove copyright. Thank!                #
+#  Please do not copy under any circumstance for commercial reason!  #
+######################################################################
+
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
+RED='\033[0;31m'
+NC='\033[0m'
+
+OS_VER=$(grep "^VERSION_ID=" "/etc/os-release" | cut -f2 -d'=' | cut -f2 -d'"')
+LIST_OS_VER_SUPPORT=('22.04' '24.04' '26.04')
+
+DIR=$(pwd)
+
+# Set link
+SCRIPT_LINK="${HOSTVN_SCRIPT_LINK:-https://circling5714.github.io/hostvn-script}"
+LOCAL_DIR="${HOSTVN_LOCAL_DIR}"
+
+welcome(){
+    clear
+    printf "========================================================\n"
+    echo   "                   HOSTVN.VN Scripts                      "
+    echo   "     Auto Install & Optimize LEMP Stack on Ubuntu         "
+    echo   "        Ho tro Ubuntu 22.04 / 24.04 / 26.04 LTS           "
+    printf "========================================================\n"
+    echo ""
+    echo "Chuan bi cai dat..."
+    sleep 3
+}
+
+apt update -y
+apt -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" upgrade -y
+apt autoremove -y
+
+
+###################
+# Prepare Install #
+###################
+
+# Remove unnecessary services
+remove_old_service(){
+    apt-get -y remove mysql* mariadb* php* apache2* postfix* nginx* fail2ban
+    rm -rf /etc/nginx/nginx.conf /etc/nginx/alias /etc/nginx/rewrite /etc/nginx/ssl /etc/nginx/wordpress
+    rm -rf /etc/nginx/apps /etc/nginx/extra /etc/nginx/redirect /etc/nginx/rocket-nginx
+    rm -rf /etc/nginx/web_apps.conf
+    rm -rf /etc/apache2
+    rm -rf /etc/php
+    rm -rf /var/hostvn
+    rm -rf /etc/my.cnf
+    rm -rf /etc/mysql
+    rm -rf /var/lib/mysql
+    rm -rf /run/mysqld
+    rm -rf /etc/fail2ban
+    rm -rf /usr/share/nginx
+    rm -rf /usr/share/nginx_module/
+    rm -rf /usr/lib/nginx/modules
+    rm -rf /usr/bin/hostvn
+    apt-get clean all
+    sed -i '/HOSTVN.VN/d' "$HOME/.bashrc"
+    sed -i '/hostvn/d' "$HOME/.bashrc"
+    sed -i '/filetransfer/d' /etc/ssh/sshd_config
+    sed -i '/Prevent user access/d' /etc/ssh/sshd_config
+    sed -i '/Disable X11/d' /etc/ssh/sshd_config
+    sed -i '/Disable tunneling/d' /etc/ssh/sshd_config
+    sed -i '/Disable port forwarding/d' /etc/ssh/sshd_config
+    sed -i '/Disable network tunneling/d' /etc/ssh/sshd_config
+    sed -i '/Force the connection/d' /etc/ssh/sshd_config
+}
+
+install_requirement(){
+    # libaio-dev keo theo runtime libaio dung ten cho tung phien ban Ubuntu
+    # (libaio1 tren 22.04, libaio1t64 tren 24.04+)
+    # libpcre2-dev thay cho libpcre3/libpcre3-dev (da bi go khoi Ubuntu 24.04+)
+    # python3 thay cho python (da bi go tu Ubuntu 20.04+)
+    # libncurses-dev thay cho libncurses5/libncurses5-dev
+    apt-get install build-essential gcc g++ make flex bison openssl libssl-dev perl perl-base perl-modules libperl-dev \
+        libperl4-corelibs-perl libwww-perl libaio-dev gifsicle webp libde265-dev \
+        zlib1g zlib1g-dev libcap-dev cron bzip2 zip automake autoconf libtool cmake python3 libdb-dev libsasl2-dev \
+        libncurses-dev libsystemd-dev bind9 dnsutils quota patch logrotate rsyslog libc6-dev libexpat1-dev \
+        libcrypt-openssl-rsa-perl libnuma-dev libnuma1 git dos2unix ipcalc unzip net-tools wget apache2-utils grc \
+        libjpeg-dev libpng-dev libtiff-dev libgif-dev libwebp-dev imagemagick libpcre2-dev uuid-dev \
+        gnupg2 ca-certificates lsb-release libxml2-dev libcurl4-openssl-dev liblmdb-dev pkgconf \
+        libyajl-dev apt-utils htop nano supervisor bc libmaxminddb-dev psmisc -y
+
+    service supervisor stop
+    systemctl disable supervisor
+}
+
+create_swap(){
+    # Trong container (Proxmox LXC, Docker...) khong the swapon,
+    # swap phai duoc cau hinh tren host
+    if systemd-detect-virt --container >/dev/null 2>&1; then
+        echo "Phat hien moi truong container (LXC/Docker). Bo qua buoc tao swap."
+        echo "Vui long cau hinh swap cho container tren host (VD: Proxmox > Resources > Swap)."
+        return
+    fi
+
+    swap="$(swapon -s)"
+    if [[ -z "${swap}" ]]; then
+        clear
+        while true
+        do
+            read -r -p "Ban co muon tao swap hay khong ? (y/n)" confirm_swap
+            echo
+            if [[ "${confirm_swap}" =~ ^([yY])$ || "${confirm_swap}" =~ ^([nN])$ ]]; then
+                break
+            else
+                printf "%s\n" "${RED}Lua chon cua ban khong chinh xac. Vui long nhap lai.${NC}"
+            fi
+        done
+    fi
+
+    if [[ "${confirm_swap}" =~ ^([yY])$ ]]; then
+        REGEX_NUMBER='^[0-9]+$'
+        while true
+        do
+            echo "Nhap vao dung luong swap muon tao. (VD: 1G nhap so 1, 2G nhap so 2)"
+            read -r -p "Nhap vao dung luong swap muon tao (Nhap 0 de huy tao swap): " swap_size
+            if [[ ${swap_size} =~ ${REGEX_NUMBER} ]]; then
+                break
+            else
+                clear
+                printf "%s\n" "${RED}Gia tri ban nhap khong dung. Vui long nhap lai.${NC}"
+            fi
+        done
+
+        if [ "${swap_size}" != 0 ]; then
+            fallocate -l "${swap_size}"G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        fi
+    fi
+}
+
+set_timezone(){
+    timedatectl set-timezone Asia/Ho_Chi_Minh || {
+        if [[ -f "/usr/share/zoneinfo/Asia/Ho_Chi_Minh" ]]; then
+            rm -f /etc/localtime
+            ln -sf /usr/share/zoneinfo/Asia/Ho_Chi_Minh /etc/localtime
+        fi
+    }
+}
+
+#########################
+#Dowload primary Script #
+#########################
+download_script(){
+    # Uu tien file trong repo da clone (cai local), fallback tai tu SCRIPT_LINK
+    if [[ -n "${LOCAL_DIR}" && -f "${LOCAL_DIR}/hostvn" ]]; then
+        cp -f "${LOCAL_DIR}/hostvn" "${DIR}/hostvn.run"
+    else
+        curl -so "${DIR}/hostvn.run" "${SCRIPT_LINK}/hostvn"
+    fi
+    dos2unix "${DIR}/hostvn.run"
+    chmod +x "${DIR}/hostvn.run"
+    HOSTVN_SCRIPT_LINK="${SCRIPT_LINK}" HOSTVN_LOCAL_DIR="${LOCAL_DIR}" bash "${DIR}/hostvn.run"
+}
+
+welcome
+if [[ " ${LIST_OS_VER_SUPPORT[*]} " == *" ${OS_VER} "* ]]; then
+    if [ "${OS_VER}" == "26.04" ]; then
+        printf "${RED}%s${NC}\n" "Luu y: Ubuntu 26.04 dang o che do thu nghiem (experimental)."
+        printf "${RED}%s${NC}\n" "PPA ondrej/php co the chua ho tro 26.04, khi do script se dung PHP mac dinh cua Ubuntu."
+        sleep 3
+    fi
+    remove_old_service
+    install_requirement
+    create_swap
+    set_timezone
+    download_script
+else
+    clear
+    printf "${RED}%s${NC}\n" "Ban dang su dung phien ban Ubuntu ${OS_VER}."
+    printf "${RED}%s${NC}\n" "Hien tai Scripts chi ho tro Ubuntu 22.04, 24.04, 26.04."
+    printf "${RED}%s${NC}\n" "Huy cai dat."
+    exit
+fi
