@@ -37,7 +37,7 @@ END
         rm -rf "${PHP1_CLI_PATH}"/00-hostvn-custom.ini
         cp "${PHP1_INI_PATH}"/00-hostvn-custom.ini "${PHP1_CLI_PATH}"/00-hostvn-custom.ini
 
-        systemctl restart php"${PHP1_VERSION}"-fpm
+        _svc restart php"${PHP1_VERSION}"-fpm
         if [ "${PHP2_RELEASE}" == "yes" ]; then
             sed -i '/allow_url_fopen/d' "${PHP2_INI_PATH}"/00-hostvn-custom.ini
             cat >> "${PHP2_INI_PATH}/00-hostvn-custom.ini" << END
@@ -45,7 +45,7 @@ allow_url_fopen = on
 END
             rm -rf "${PHP2_CLI_PATH}"/00-hostvn-custom.ini
             cp "${PHP2_INI_PATH}"/00-hostvn-custom.ini "${PHP2_CLI_PATH}"/00-hostvn-custom.ini
-            systemctl restart php"${PHP2_VERSION}"-fpm
+            _svc restart php"${PHP2_VERSION}"-fpm
         fi
 
         clear
@@ -79,7 +79,7 @@ END
         rm -rf "${PHP1_CLI_PATH}"/00-hostvn-custom.ini
         cp "${PHP1_INI_PATH}"/00-hostvn-custom.ini "${PHP1_CLI_PATH}"/00-hostvn-custom.ini
 
-        systemctl restart php"${PHP1_VERSION}"-fpm
+        _svc restart php"${PHP1_VERSION}"-fpm
         if [ "${PHP2_RELEASE}" == "yes" ]; then
             sed -i '/allow_url_fopen/d' "${PHP2_INI_PATH}"/00-hostvn-custom.ini
             cat >> "${PHP2_INI_PATH}/00-hostvn-custom.ini" << END
@@ -87,7 +87,7 @@ allow_url_fopen = off
 END
             rm -rf "${PHP2_CLI_PATH}"/00-hostvn-custom.ini
             cp "${PHP2_INI_PATH}"/00-hostvn-custom.ini "${PHP2_CLI_PATH}"/00-hostvn-custom.ini
-            systemctl restart php"${PHP2_VERSION}"-fpm
+            _svc restart php"${PHP2_VERSION}"-fpm
         fi
 
         clear

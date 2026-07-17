@@ -17,10 +17,10 @@ _clear_cache() {
     printf "${GREEN}%s\n${NC}" "Dang xoa cache. Vui long doi..."
     sleep 1
     if service_running 'redis'; then
-        systemctl restart redis
+        _svc restart redis
     fi
     if service_running 'memcached'; then
-        systemctl restart memcached
+        _svc restart memcached
     fi
 
     if [[ "$(ls -A "${USER_DIR}")" ]]; then

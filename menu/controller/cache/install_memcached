@@ -67,8 +67,8 @@ logfile /var/log/memcached.log
 # Disable UDP
 -U 0
 END
-    systemctl restart memcached
-    sudo systemctl enable memcached
+    _svc restart memcached
+    _svc enable memcached
 
     _restart_service
 
@@ -76,7 +76,7 @@ END
         cron_exists=$(crontab -l | grep -w 'memcached')
         if [ -z "${cron_exists}" ]; then
             crontab -l > clear_memcached
-            echo "23 */37 * * * systemctl restart memcached >/dev/null 2>&1" >> clear_memcached
+            echo "23 */37 * * * _svc restart memcached >/dev/null 2>&1" >> clear_memcached
             crontab clear_memcached
             rm -rf clear_memcached
         fi

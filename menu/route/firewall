@@ -42,7 +42,7 @@ do
             read -r -p "${lang_input_port}: " port
             if [[ ${port} =~ ^-?[0-9]+$ ]]; then
                 ufw allow "${port}"/tcp
-                systemctl restart ufw
+                _svc restart ufw
                 notify="${GREEN}${lang_open_port_success}.${NC}"
             else
                 notify="${RED}${lang_port_wrong_format}${NC}"
@@ -89,18 +89,18 @@ do
 #            menu_firewall
 #            ;;
         5)
-            systemctl restart ufw
-            systemctl restart fail2ban
+            _svc restart ufw
+            _svc restart fail2ban
             clear
             printf "%s\n" "${GREEN}${lang_restart_firewall_success}.${NC}"
             echo ""
             menu_firewall
             ;;
         6)
-            systemctl stop ufw
-            systemctl disable ufw
-            systemctl stop fail2ban
-            systemctl disable fail2ban
+            _svc stop ufw
+            _svc disable ufw
+            _svc stop fail2ban
+            _svc disable fail2ban
             ufw disable << EOF
 y
 EOF
@@ -110,10 +110,10 @@ EOF
             menu_firewall
             ;;
         7)
-            systemctl start ufw
-            systemctl enable ufw
-            systemctl restart fail2ban
-            systemctl enable fail2ban
+            _svc start ufw
+            _svc enable ufw
+            _svc restart fail2ban
+            _svc enable fail2ban
             ufw enable << EOF
 y
 EOF

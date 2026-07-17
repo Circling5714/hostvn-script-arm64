@@ -50,7 +50,7 @@ while [ "${CHOICE}" != "0" ]; do
         lemp_destroy_db
         ;;
     5)
-        systemctl restart mariadb
+        _svc restart mariadb
         clear
         printf "${GREEN}%s${NC}\n" "${lang_restart_mariadb_success}."
         lemp_database

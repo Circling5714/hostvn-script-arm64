@@ -36,7 +36,7 @@ _run() {
             cat >> "${PHP_POOL_PATH}/$domain.conf" << END
 php_admin_value[disable_functions] = exec,system,passthru,shell_exec,dl,popen,show_source,posix_kill,posix_mkfifo,posix_getpwuid,posix_setpgid,posix_setsid,posix_setuid,posix_setgid,posix_seteuid,posix_setegid,posix_uname
 END
-            systemctl restart php"${PHP_VERSION}"-fpm
+            _svc restart php"${PHP_VERSION}"-fpm
 
             clear
             printf "${GREEN}%s${NC}\n" "Bat proc_close thanh cong."
@@ -60,7 +60,7 @@ END
             cat >> "${PHP_POOL_PATH}/$domain.conf" << END
 php_admin_value[disable_functions] = exec,system,passthru,shell_exec,proc_close,proc_open,dl,popen,show_source,posix_kill,posix_mkfifo,posix_getpwuid,posix_setpgid,posix_setsid,posix_setuid,posix_setgid,posix_seteuid,posix_setegid,posix_uname
 END
-            systemctl restart php"${PHP_VERSION}"-fpm
+            _svc restart php"${PHP_VERSION}"-fpm
 
             clear
             printf "${GREEN}%s${NC}\n" "Tat proc_close thanh cong."

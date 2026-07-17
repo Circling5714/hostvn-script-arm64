@@ -34,7 +34,7 @@ _run() {
 
         if [[ "${prompt_disable_open_basedir}" =~ ^([yY])$ ]]; then
             sed -i '/open_basedir/d' "${PHP_POOL_PATH}"/"$domain".conf
-            systemctl restart php"${PHP_VERSION}"-fpm
+            _svc restart php"${PHP_VERSION}"-fpm
 
             clear
             printf "${GREEN}%s${NC}\n" "Tat open_basedir thanh cong."
@@ -58,7 +58,7 @@ _run() {
 php_admin_value[open_basedir] = /home/${USER}/:/dev/urandom:/usr/share/php/:/dev/shm
 END
 
-            systemctl restart php"${PHP_VERSION}"-fpm
+            _svc restart php"${PHP_VERSION}"-fpm
 
             clear
             printf "${GREEN}%s${NC}\n" "Bat open_basedir thanh cong."

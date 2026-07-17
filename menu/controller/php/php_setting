@@ -111,9 +111,9 @@ _change_parameter(){
 }
 
 _restart_php(){
-    systemctl restart php"${PHP1_VERSION}"-fpm
+    _svc restart php"${PHP1_VERSION}"-fpm
     if [[ "${php2_release}" == "yes" ]]; then
-        systemctl restart php"${PHP2_VERSION}"-fpm
+        _svc restart php"${PHP2_VERSION}"-fpm
     fi
 }
 

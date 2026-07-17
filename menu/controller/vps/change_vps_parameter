@@ -338,12 +338,12 @@ _run(){
     _change_php_user
 
     if nginx -t; then
-        systemctl reload nginx
-        systemctl restart php"${php1_version}"-fpm
+        _svc reload nginx
+        _svc restart php"${php1_version}"-fpm
         if [ "${php2_release}" == "yes" ]; then
-            systemctl restart php"${php2_version}"-fpm
+            _svc restart php"${php2_version}"-fpm
         fi
-        systemctl restart mariadb
+        _svc restart mariadb
         clear
         printf "%s\n" "${GREEN}Cap nhat lai thong so thanh cong.${NC}"
     else

@@ -58,7 +58,7 @@ _change_port() {
     echo "admin_port=${new_port}" >> "${FILE_INFO}"
     ufw allow "${new_port}"/tcp
     ufw delete allow "${current_port}"
-    systemctl restart ufw
+    _svc restart ufw
 
     rm -rf /etc/fail2ban/jail.local
     if [ -f "${CUSTOM_DIR}/fail2ban/jail.local" ]; then
@@ -73,10 +73,10 @@ _change_port() {
     sed -i "s/ADMIN_EMAIL/${admin_email}/g" /etc/fail2ban/jail.local
     sed -i "s/${current_port}/${new_port}/g" /etc/fail2ban/jail.d/nginx-http-auth.conf
 
-    systemctl restart fail2ban
+    _svc restart fail2ban
 
     if nginx -t; then
-        systemctl reload nginx
+        _svc reload nginx
         clear
         printf "%s\n" "${GREEN}${lang_change_port_success} New port:${NC} ${RED}${new_port}${NC}"
     else

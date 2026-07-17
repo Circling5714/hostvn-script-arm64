@@ -53,7 +53,7 @@ EOF
     cat >> "$PHP1_CLI_PATH/30-igbinary.ini" << EOF
 extension=igbinary.so
 EOF
-    systemctl restart php"${PHP1_VERSION}"-fpm
+    _svc restart php"${PHP1_VERSION}"-fpm
 }
 
 _install_php1_redis(){
@@ -114,7 +114,7 @@ EOF
     cat >> "$PHP2_CLI_PATH/30-igbinary.ini" << EOF
 extension=igbinary.so
 EOF
-    systemctl restart php"${PHP2_VERSION}"-fpm
+    _svc restart php"${PHP2_VERSION}"-fpm
 }
 
 _install_php2_redis(){

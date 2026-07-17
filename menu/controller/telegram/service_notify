@@ -23,8 +23,8 @@ TOKEN="$TELEGRAM_TOKEN"
 TIMEOUT="10"
 URL="https://api.telegram.org/bot\$TOKEN/sendMessage"
 DATE_EXEC="\$(date "+%d %b %Y %H:%M")"
-NGINX_STATUS=\$(systemctl is-active nginx)
-MARIADB_STATUS=\$(systemctl is-active mariadb)
+NGINX_STATUS=\$(_svc is-active nginx)
+MARIADB_STATUS=\$(_svc is-active mariadb)
 IPADDR=\$(curl -s http://cyberpanel.sh/?ip)
 
 if [ "\$NGINX_STATUS" == "inactive" ]; then
@@ -38,7 +38,7 @@ if [ "\$MARIADB_STATUS" == "inactive" ]; then
 fi
 
 if [ -n "\$PHP1_VERSION" ]; then
-    PHP1_STATUS=\$(systemctl is-active php\$PHP1_VERSION-fpm.service)
+    PHP1_STATUS=\$(_svc is-active php\$PHP1_VERSION-fpm.service)
     if [ "\$PHP1_STATUS" == "inactive" ]; then
         TEXT="\$DATE_EXEC: CANH BAO - PHP-FPM \$PHP1_VERSION tren VPS \$IPADDR hien khong hoat dong"
         curl -s --max-time \$TIMEOUT -d "chat_id=\$CHAT_ID&disable_web_page_preview=1&text=\$TEXT" \$URL > /dev/null
@@ -46,7 +46,7 @@ if [ -n "\$PHP1_VERSION" ]; then
 fi
 
 if [[ -n "\$PHP2_VERSION" && "\$PHP2_RELEASE" == "yes" ]]; then
-    PHP2_STATUS=\$(systemctl is-active php\$PHP2_VERSION-fpm.service)
+    PHP2_STATUS=\$(_svc is-active php\$PHP2_VERSION-fpm.service)
     if [ "\$PHP2_STATUS" == "inactive" ]; then
         TEXT="\$DATE_EXEC: CANH BAO - PHP-FPM \$PHP2_VERSION tren VPS \$IPADDR hien khong hoat dong"
         curl -s --max-time \$TIMEOUT -d "chat_id=\$CHAT_ID&disable_web_page_preview=1&text=\$TEXT" \$URL > /dev/null

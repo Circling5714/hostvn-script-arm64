@@ -63,7 +63,7 @@ END
             cp "${PHP1_INI_PATH}"/00-hostvn-custom.ini "${PHP1_CLI_PATH}"/00-hostvn-custom.ini
             notify_php1_ioncube="Cai dat ionCube cho PHP 1 thanh cong."
             COLOR1="${GREEN}"
-            systemctl restart php"${PHP1_VERSION}"-fpm
+            _svc restart php"${PHP1_VERSION}"-fpm
         fi
     fi
 }
@@ -93,7 +93,7 @@ END
             cp "${PHP2_INI_PATH}"/00-hostvn-custom.ini "${PHP2_CLI_PATH}"/00-hostvn-custom.ini
             notify_php2_ioncube="Cai dat ionCube cho PHP 2 thanh cong."
             COLOR2="${GREEN}"
-            systemctl restart php"${PHP2_VERSION}"-fpm
+            _svc restart php"${PHP2_VERSION}"-fpm
         fi
     fi
 }

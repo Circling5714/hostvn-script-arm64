@@ -80,10 +80,10 @@ _run(){
     _update
     _config_phpmyadmin
     if nginx -t; then
-        systemctl reload nginx
-        systemctl restart php"${php1_version}"-fpm
+        _svc reload nginx
+        _svc restart php"${php1_version}"-fpm
         if [ "${php2_release}" == "yes" ]; then
-            systemctl restart php"${php2_version}"-fpm
+            _svc restart php"${php2_version}"-fpm
         fi
         clear
         printf "%s\n" "${GREEN}Update phpMyAdmin success.${NC}"

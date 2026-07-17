@@ -148,10 +148,10 @@ action = %(action_)s
          cloudflare-hostvn
 EOF
 
-    systemctl restart fail2ban
+    _svc restart fail2ban
     sleep 2
     clear
-    if systemctl is-active --quiet fail2ban; then
+    if _svc_active fail2ban; then
         printf "%s\n" "${GREEN}Da bat dong bo Fail2ban -> Cloudflare WAF (zone: ${zone_id}).${NC}"
         printf "%s\n" "${GREEN}Tu gio moi IP bi fail2ban ban se bi chan tren Cloudflare.${NC}"
     else
@@ -161,7 +161,7 @@ EOF
 
 _disable() {
     rm -f "${ATTACH_FILE}" "${ACTION_FILE}" "${CONF}"
-    systemctl restart fail2ban
+    _svc restart fail2ban
     clear
     printf "%s\n" "${GREEN}Da tat dong bo Cloudflare WAF.${NC}"
 }
