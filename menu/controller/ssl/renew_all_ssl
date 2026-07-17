@@ -1,0 +1,155 @@
+#!/bin/bash
+
+######################################################################
+#           Auto Install & Optimize LEMP Stack on Ubuntu             #
+#                                                                    #
+#                Author: Sanvv - HOSTVN Technical                    #
+#                  Website: https://hostvn.vn                        #
+#                                                                    #
+#              Please do not remove copyright. Thank!                #
+#  Please do not copy under any circumstance for commercial reason!  #
+######################################################################
+
+source /var/hostvn/menu/validate/rule
+source /var/hostvn/menu/helpers/function
+
+_confirm_renew(){
+    echo "Are you sure ?"
+    PS3="Enter select: "
+    confirm_renew_type=(
+        "Yes"
+        "No"
+    )
+    select opt_renew_type in "${confirm_renew_type[@]}"; do
+        case $opt_renew_type in
+        "Yes")
+            confirm_type="1"
+            break
+            ;;
+        "No")
+            confirm_type="2"
+            break
+            ;;
+        *) printf "%s\n" "${RED}Lua chon cua ban khong chinh xac. Vui long chon lai${NC}" ;;
+        esac
+    done
+}
+
+_remove_ssl_cert(){
+    rm -rf "${SSL_DIR}"/"${domain}"/key.pem
+    rm -rf "${SSL_DIR}"/"${domain}"/cert.pem
+    rm -rf /root/.acme.sh/"${domain}"
+    sed -i '/https.conf/d' "${VHOST_DIR}"/"${domain}".conf
+    sed -i '/ssl_certificate/d' "${VHOST_DIR}"/"${domain}".conf
+    sed -i '/ssl_certificate_key/d' "${VHOST_DIR}"/"${domain}".conf
+    sed -i "/listen 443/a ssl_certificate /etc/nginx/ssl/server/server.crt;" "${VHOST_DIR}"/"${domain}".conf
+    sed -i "/listen 443/a ssl_certificate_key /etc/nginx/ssl/server/server.key;" "${VHOST_DIR}"/"${domain}".conf
+    sed -i "/listen 443/a return 404;" "${VHOST_DIR}"/"${domain}".conf
+
+    if nginx -t; then
+        _restart_service
+        clear
+    fi
+}
+
+_install_acme_if_not_exists(){
+    if [ ! -d "/root/.acme.sh" ]; then
+        if [ -z "${admin_email}" ]; then
+            while true
+            do
+                read -r -p "${INPUT_EMAIL}" admin_email
+                echo
+                if [[ "${admin_email}" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$ ]]; then
+                    break
+                else
+                    clear
+                    printf "%s\n"  "${RED}${WRONG_EMAIL}${NC}"
+                fi
+            done
+        fi
+
+        curl https://get.acme.sh | sh -s email="${admin_email}"
+    fi
+
+    /root/.acme.sh/acme.sh --upgrade
+    clear
+}
+
+_renew_ssl() {
+    _install_acme_if_not_exists
+
+    _remove_ssl_cert
+
+    /root/.acme.sh/acme.sh --cron --home /root/.acme.sh --server letsencrypt --force
+
+    if [ ! -d "${SSL_DIR}/${domain}" ]; then
+        mkdir -p "${SSL_DIR}"/"${domain}"
+    fi
+
+    if [ -f "${SSL_DIR}/${domain}/key.pem" ]; then
+        rm -rf "${SSL_DIR}"/"${domain}"/key.pem
+    fi
+
+    if [ -f "${SSL_DIR}/${domain}/cert.pem" ]; then
+        rm -rf "${SSL_DIR}"/"${domain}"/cert.pem
+    fi
+
+    /root/.acme.sh/acme.sh --install-cert -d "${domain}" \
+        --key-file "${SSL_DIR}"/"${domain}"/key.pem \
+        --fullchain-file "${SSL_DIR}"/"${domain}"/cert.pem
+}
+
+_edit_vhost() {
+    sed -i '/https.conf/d' "${VHOST_DIR}"/"${domain}".conf
+    sed -i "/listen 80;/a include ${NGINX_CONF_DIR}/extra/https.conf;" "${VHOST_DIR}"/"${domain}".conf
+
+    sed -i '/return 404;/d' "${VHOST_DIR}"/"${domain}".conf
+    sed -i '/error_page 404/d' "${VHOST_DIR}"/"${domain}".conf
+    sed -i '/ssl_certificate/d' "${VHOST_DIR}"/"${domain}".conf
+    sed -i '/ssl_certificate_key/d' "${VHOST_DIR}"/"${domain}".conf
+
+    sed -i "/listen 443/a ssl_certificate ${SSL_DIR}/${domain}/cert.pem;" "${VHOST_DIR}"/"${domain}".conf
+    sed -i "/listen 443/a ssl_certificate_key ${SSL_DIR}/${domain}/key.pem;" "${VHOST_DIR}"/"${domain}".conf
+}
+
+_run(){
+    if [[ "$(ls -A "${USER_DIR}")" ]]; then
+        _cd_dir "${USER_DIR}"
+        for entry in .*.conf; do
+            domain=${entry/./}
+            domain=${domain//.conf/}
+            if [ "$domain" != '*' ]; then
+                _renew_ssl
+                if [[ -f "${SSL_DIR}/${domain}/key.pem" && -f "${SSL_DIR}/${domain}/cert.pem" && -s "${SSL_DIR}/${domain}/key.pem" && -s "${SSL_DIR}/${domain}/cert.pem" ]]; then
+                    _edit_vhost
+                    service nginx reload
+                fi
+            fi
+        done
+    else
+        printf "%s\n" "${RED}${EMPTY_DOMAIN}${NC}"
+    fi
+}
+
+ALERT=''
+
+check_nginx_status
+
+if [ -z "${ALERT}" ]; then
+    _confirm_renew
+    if [ "$confirm_type" == 1 ]; then
+        _run
+    else
+        clear
+        echo
+        printf "%s\n" "${RED}${lang_cancel_action}${NC}"
+        echo
+    fi
+else
+    clear
+    echo
+    printf "%s\n" "${ALERT}"
+    echo
+fi
+
+ssl_le

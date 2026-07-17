@@ -1,0 +1,103 @@
+#!/bin/bash
+
+######################################################################
+#           Auto Install & Optimize LEMP Stack on Ubuntu             #
+#                                                                    #
+#                Author: Sanvv - HOSTVN Technical                    #
+#                  Website: https://hostvn.vn                        #
+#                                                                    #
+#          Rebuild for Ubuntu 22.04 / 24.04 / 26.04 LTS              #
+#              Please do not remove copyright. Thank!                #
+#  Please do not copy under any circumstance for commercial reason!  #
+######################################################################
+
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
+apt update -y
+apt -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" upgrade -y
+apt autoremove -y
+apt install dos2unix curl wget -y
+
+# Set Color
+RED='\033[0;31m'
+NC='\033[0m'
+
+OS=$(grep -w "ID" "/etc/os-release" | cut -f2 -d'=' | cut -f2 -d'"')
+# Link tai script online. Co the override bang bien moi truong HOSTVN_SCRIPT_LINK
+SCRIPT_LINK="${HOSTVN_SCRIPT_LINK:-https://circling5714.github.io/hostvn-script}"
+OS_LIST="ubuntu"
+RAM_TOTAL=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+LOW_RAM='400000'
+INSTALL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# Control Panel path
+CPANEL="/usr/local/cpanel/cpanel"
+DIRECTADMIN="/usr/local/directadmin/custombuild/build"
+PLESK="/usr/local/psa/version"
+WEBMIN="/etc/init.d/webmin"
+SENTORA="/root/passwords.txt"
+HOCVPS="/etc/hocvps/scripts.conf"
+VPSSIM="/home/vpssim.conf"
+EEV3="/usr/local/bin/ee"
+WORDOPS="/usr/local/bin/wo"
+KUSANAGI="/home/kusanagi"
+CWP="/usr/local/cwpsrv"
+VESTA="/usr/local/vesta/"
+EEV4="/opt/easyengine"
+LARVPS="/etc/larvps/.info.conf"
+TINO="/opt/tinopanel"
+
+# Set Lang
+ROOT_ERR="Ban can dang nhap SSH voi user root."
+CANCEL_INSTALL="Huy cai dat..."
+RAM_NOT_ENOUGH="Canh bao: Dung luong RAM qua thap de cai Script. (it nhat 512MB)"
+WRONG_OS="Rat tiec he dieu hanh ban dang su dung khong duoc ho tro. Script chi ho tro Ubuntu 22.04, 24.04, 26.04."
+OTHER_CP_EXISTS="May chu cua ban da cai dat Control Panel khac. Vui long rebuild de cai dat Script."
+HOSTVN_EXISTS="May chu cua ban da cai dat HOSTVN Script. Vui long rebuild neu muon cai dat lai."
+
+if [[ "$(id -u)" != "0" ]]; then
+    printf "${RED}%s${NC}\n" "${ROOT_ERR}"
+    printf "${RED}%s${NC}\n" "${CANCEL_INSTALL}"
+    exit
+fi
+
+if [[ ${RAM_TOTAL} -lt ${LOW_RAM} ]]; then
+    printf "${RED}%s${NC}\n" "${RAM_NOT_ENOUGH}"
+    printf "${RED}%s${NC}\n" "${CANCEL_INSTALL}"
+    exit
+fi
+
+if [[ -f "${CPANEL}" || -f "${DIRECTADMIN}" || -f "${PLESK}" || -f "${WEBMIN}" || -f "${SENTORA}" || -f "${HOCVPS}" || -f "${LARVPS}" ]]; then
+    printf "${RED}%s${NC}\n" "${OTHER_CP_EXISTS}"
+    printf "${RED}%s${NC}\n" "${CANCEL_INSTALL}"
+    exit
+fi
+
+if [[ -f "${VPSSIM}" || -f "${WORDOPS}" || -f "${EEV3}" || -d "${EEV4}" || -d "${VESTA}" || -d "${CWP}" || -d "${KUSANAGI}" || -d "${TINO}" ]]; then
+    printf "${RED}%s${NC}\n" "${OTHER_CP_EXISTS}"
+    printf "${RED}%s${NC}\n" "${CANCEL_INSTALL}"
+    exit
+fi
+
+if [[ -f "/var/hostvn/.hostvn.conf" ]]; then
+    printf "${RED}%s${NC}\n" "${HOSTVN_EXISTS}"
+    printf "${RED}%s${NC}\n" "${CANCEL_INSTALL}"
+    exit
+fi
+
+if [[ " ${OS_LIST[*]} " == *" ${OS} "* ]]; then
+    # Uu tien file trong repo da clone (cai local), fallback tai tu SCRIPT_LINK
+    if [ -f "${INSTALL_DIR}/${OS}" ]; then
+        cp -f "${INSTALL_DIR}/${OS}" "./${OS}.run"
+    else
+        curl -so "./${OS}.run" "${SCRIPT_LINK}/${OS}"
+    fi
+    dos2unix "./${OS}.run"
+    chmod +x "./${OS}.run"
+    HOSTVN_SCRIPT_LINK="${SCRIPT_LINK}" HOSTVN_LOCAL_DIR="${INSTALL_DIR}" bash "./${OS}.run"
+else
+    printf "${RED}%s${NC}\n" "${WRONG_OS}"
+    printf "${RED}%s${NC}\n" "${CANCEL_INSTALL}"
+    exit
+fi

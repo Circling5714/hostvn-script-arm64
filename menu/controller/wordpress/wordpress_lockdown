@@ -1,0 +1,214 @@
+#!/bin/bash
+
+######################################################################
+#           Auto Install & Optimize LEMP Stack on Ubuntu             #
+#                                                                    #
+#                Author: Sanvv - HOSTVN Technical                    #
+#                  Website: https://hostvn.vn                        #
+#                                                                    #
+#              Please do not remove copyright. Thank!                #
+#  Please do not copy under any circumstance for commercial reason!  #
+######################################################################
+
+source /var/hostvn/menu/validate/rule
+source /var/hostvn/menu/helpers/function
+
+_select_lockdown_action() {
+    clear
+    printf "%s\n" "Select action"
+    PS3="Nhap vao lua chon cua ban [ 1 - 3 ]: "
+    options=("Disable WordPress Lockdown" "Enable WordPress Lockdown" "Cancel")
+    select opt in "${options[@]}"; do
+        case $opt in
+        "Disable WordPress Lockdown")
+            action="disable"
+            break
+            ;;
+        "Enable WordPress Lockdown")
+            action="enable"
+            break
+            ;;
+        "Cancel")
+            action="cancel"
+            break
+            ;;
+        *) printf "${RED}%s${NC}\n" "Lua chon cua ban khong chinh xac. Vui long chon lai." ;;
+        esac
+    done
+    sleep 1
+}
+
+_select_site_enable_lockdown() {
+    domain=""
+    if [[ "$(ls -A "${USER_DIR}")" ]]; then
+        domains=()
+        echo "${LIST_DOMAIN}"
+        _cd_dir "${USER_DIR}"
+        for entry in .*.conf; do
+            domain=${entry/./}
+            domain=${domain//.conf/}
+            user=$(grep -w "username" "${USER_DIR}/.${domain}.conf" | cut -f2 -d'=')
+            lockdown_status=$(grep -w "lockdown_status" "${USER_DIR}/.${domain}.conf" | cut -f2 -d'=')
+
+            if [[ -d "/home/${user}/${domain}/public_html/wp-content" && "${lockdown_status}" != 'yes' ]]; then
+                domains+=("${domain}")
+            fi
+        done
+        if [ ${#domains[@]} -eq 0 ]; then
+            ALERT=$(printf "%s\n" "${RED}Tat ca cac website WordPress da duoc Lockdown.${NC}")
+        else
+            echo "Select website"
+            PS3="${INPUT_SELECT} [0 = Exit]: "
+            select opt in "${domains[@]}"; do
+                domain=$opt
+                break
+            done
+        fi
+    else
+        ALERT=$(printf "%s\n" "${RED}${EMPTY_DOMAIN}${NC}")
+    fi
+}
+
+_select_site_disable_lockdown() {
+    domain=""
+    if [[ "$(ls -A "${USER_DIR}")" ]]; then
+        domains=()
+        echo "${LIST_DOMAIN}"
+        _cd_dir "${USER_DIR}"
+        for entry in .*.conf; do
+            domain=${entry/./}
+            domain=${domain//.conf/}
+            user=$(grep -w "username" "${USER_DIR}/.${domain}.conf" | cut -f2 -d'=')
+            lockdown_status=$(grep -w "lockdown_status" "${USER_DIR}/.${domain}.conf" | cut -f2 -d'=')
+            if [[ -d "/home/${user}/${domain}/public_html/wp-content" && "${lockdown_status}" == 'yes' ]]; then
+                domains+=("${domain}")
+            fi
+        done
+        if [ ${#domains[@]} -eq 0 ]; then
+            ALERT=$(printf "%s\n" "${RED}Chua co website WordPress duoc bat Lockdown.${NC}")
+        else
+            echo "Select website"
+            PS3="${INPUT_SELECT} [0 = Exit]: "
+            select opt in "${domains[@]}"; do
+                domain=$opt
+                break
+            done
+        fi
+    else
+        ALERT=$(printf "%s\n" "${RED}${EMPTY_DOMAIN}${NC}")
+    fi
+}
+
+_enable_lockdown(){
+    notify="${GREEN}Bat WordPress Lockdown thanh cong.${NC}"
+
+    if [ -d "/home/${user}/${domain}/public_html/wp-includes" ]; then
+        chattr +i /home/"${user}"/"${domain}"/public_html
+        chattr -R +i /home/"${user}"/"${domain}"/public_html/wp-admin
+        chattr -R +i /home/"${user}"/"${domain}"/public_html/wp-includes
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-content
+        chattr -R +i /home/"${user}"/"${domain}"/public_html/wp-content/plugins
+        chattr -R +i /home/"${user}"/"${domain}"/public_html/wp-content/themes
+        chattr +i /home/"${user}"/"${domain}"/public_html/index.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/robots.txt
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-activate.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-blog-header.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-comments-post.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-cron.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-links-opml.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-load.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-login.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-mail.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-settings.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-signup.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/wp-trackback.php
+        chattr +i /home/"${user}"/"${domain}"/public_html/xmlrpc.php
+
+        sed -i "/lockdown_status/d" "${USER_DIR}/.${domain}.conf"
+        echo "lockdown_status=yes" >> "${USER_DIR}/.${domain}.conf"
+    else
+        notify="${RED}Thu muc chua ma nguon khong ton tai hoac website khong phai WordPress.${NC}"
+    fi
+}
+
+_disable_lockdown(){
+    notify="${GREEN}Ta WordPress Lockdown thanh cong.${NC}"
+
+    if [ -d "/home/${user}/${domain}/public_html/wp-includes" ]; then
+        chattr -i /home/"${user}"/"${domain}"/public_html
+        chattr -R -i /home/"${user}"/"${domain}"/public_html/wp-admin
+        chattr -R -i /home/"${user}"/"${domain}"/public_html/wp-includes
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-content
+        chattr -R -i /home/"${user}"/"${domain}"/public_html/wp-content/plugins
+        chattr -R -i /home/"${user}"/"${domain}"/public_html/wp-content/themes
+        chattr -i /home/"${user}"/"${domain}"/public_html/index.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/robots.txt
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-activate.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-blog-header.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-comments-post.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-cron.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-links-opml.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-load.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-login.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-mail.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-settings.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-signup.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/wp-trackback.php
+        chattr -i /home/"${user}"/"${domain}"/public_html/xmlrpc.php
+
+        sed -i "/lockdown_status/d" "${USER_DIR}/.${domain}.conf"
+        echo "lockdown_status=no" >> "${USER_DIR}/.${domain}.conf"
+    else
+        notify="${RED}Thu muc chua ma nguon khong ton tai hoac website khong phai WordPress.${NC}"
+    fi
+}
+
+_run(){
+    user=$(grep -w "username" "${USER_DIR}/.${domain}.conf" | cut -f2 -d'=')
+
+    if [ "${action}" == "enable" ]; then
+        _enable_lockdown
+    fi
+    if [ "${action}" == "disable" ]; then
+        _disable_lockdown
+    fi
+
+    clear
+    printf "%s\n" "${notify}"
+}
+
+ALERT=""
+domain=""
+action=""
+lockdown_status=""
+notify=""
+
+_select_lockdown_action
+
+if [[ -z "${action}" || "${action}" == "cancel" ]]; then
+    clear
+    printf "${RED}%s${NC}\n" "${lang_cancel_action}"
+else
+    if [ "${action}" == "enable" ]; then
+        _select_site_enable_lockdown
+    fi
+
+    if [ "${action}" == "disable" ]; then
+        _select_site_disable_lockdown
+    fi
+
+    if [[ -z "${domain}" && -z "${ALERT}" ]]; then
+        clear
+        printf "%s\n" "${RED}${lang_cancel_action}${NC}"
+    else
+        if [ -z "${ALERT}" ]; then
+            _run
+        else
+            clear
+            printf "%s\n" "${ALERT}"
+        fi
+    fi
+fi
+
+menu_wordpress
+

@@ -1,0 +1,255 @@
+#!/bin/bash
+
+######################################################################
+#           Auto Install & Optimize LEMP Stack on Ubuntu             #
+#                                                                    #
+#                Author: Sanvv - HOSTVN Technical                    #
+#                  Website: https://hostvn.vn                        #
+#                                                                    #
+#              Please do not remove copyright. Thank!                #
+#  Please do not copy under any circumstance for commercial reason!  #
+######################################################################
+
+CHOICE=1
+
+nginx_v=$(
+    nginx -v 2>&1 | grep -o '[0-9.]*$'
+    echo
+)
+nginx_status=$(pgrep -x nginx >/dev/null && printf "%s\n" "${GREEN}Active${NC}" || printf "%s\n" "${GREEN}Inactive (Dead)${NC}")
+
+# Build Nginx tu source voi PCRE2 + OpenSSL 3 cua he thong
+# (libpcre3/OpenSSL 1.1.1 da bi go khoi Ubuntu 24.04+)
+_build_nginx(){
+    local NGINX_BUILD_VERSION="$1"
+    MODULE_PATH="/usr/share/nginx_module"
+    mkdir -p "${MODULE_PATH}"
+    apt-get install build-essential zlib1g-dev libpcre2-dev libssl-dev libbrotli-dev unzip uuid-dev git -y
+    ngx_cache_purge_version=$(curl -s "${UPDATE_LINK}"/version | grep "ngx_cache_purge_version=" | cut -f2 -d'=')
+    more_clear_headers_v=$(curl -s "${UPDATE_LINK}"/version | grep "more_clear_headers_v=" | cut -f2 -d'=')
+    nginx_module_vts_v=$(curl -s "${UPDATE_LINK}"/version | grep "nginx_module_vts_v=" | cut -f2 -d'=')
+
+    cd "${MODULE_PATH}" || exit
+
+    rm -rf "${MODULE_PATH:?}"/*
+
+    wget -O- https://nginx.org/download/nginx-"${NGINX_BUILD_VERSION}".tar.gz | tar -xz
+    # Fork nginx-modules/ngx_cache_purge tuong thich nginx moi (FRiCKLE goc da ngung phat trien)
+    wget -O- https://github.com/nginx-modules/ngx_cache_purge/archive/refs/tags/"${ngx_cache_purge_version}".tar.gz | tar -xz
+    wget -O- https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v"${more_clear_headers_v}".tar.gz | tar -xz
+    wget -O- https://github.com/vozlt/nginx-module-vts/archive/refs/tags/v"${nginx_module_vts_v}".tar.gz | tar -xz
+    git clone --depth 1 https://github.com/google/ngx_brotli
+    cd ngx_brotli || exit
+    git submodule update --init
+
+    service nginx stop
+    cd "${MODULE_PATH}"/nginx-"${NGINX_BUILD_VERSION}"/ || exit
+    ./configure \
+        "--user=nginx" \
+        "--group=nginx" \
+        "--prefix=/usr" \
+        "--sbin-path=/usr/sbin" \
+        "--conf-path=/etc/nginx/nginx.conf" \
+        "--pid-path=/var/run/nginx.pid" \
+        "--http-log-path=/var/log/nginx/access_log" \
+        "--error-log-path=/var/log/nginx/error_log" \
+        "--without-mail_imap_module" \
+        "--without-mail_smtp_module" \
+        "--with-http_ssl_module" \
+        "--with-http_realip_module" \
+        "--with-http_stub_status_module" \
+        "--with-http_gzip_static_module" \
+        "--with-http_dav_module" \
+        "--with-http_v2_module" \
+        "--with-http_v3_module" \
+        "--with-pcre-jit" \
+        "--add-module=../ngx_cache_purge-${ngx_cache_purge_version}" \
+        "--add-module=../headers-more-nginx-module-${more_clear_headers_v}" \
+        "--add-module=../ngx_brotli" \
+        "--add-module=../nginx-module-vts-${nginx_module_vts_v}" \
+        "--with-cc-opt='-D FD_SETSIZE=32768'"
+
+    make -j"$(nproc)" && make install
+}
+
+printf "%s=============================%s\n" "${GREEN}" "${NC}"
+printf "%s        Nginx Manager        %s\n" "${GREEN}" "${NC}"
+printf "%s=============================%s\n" "${GREEN}" "${NC}"
+printf "%sNginx version : %s%s\n" "${GREEN}" "${nginx_v}" "${NC}"
+printf "%s=============================%s\n" "${GREEN}" "${NC}"
+printf "%sStatus: %s%s\n" "${GREEN}" "${nginx_status}" "${NC}"
+printf "%s=============================%s\n" "${GREEN}" "${NC}"
+
+while [ "${CHOICE}" != "0" ]; do
+    printf "%s1. Restart Nginx%s\n" "${GREEN}" "${NC}"
+    printf "%s2. ${lang_test_nginx_config}%s\n" "${GREEN}" "${NC}"
+    printf "%s3. Update Nginx%s\n" "${GREEN}" "${NC}"
+    printf "%s4. Rebuild Nginx%s\n" "${GREEN}" "${NC}"
+    printf "%s=========================%s\n" "${GREEN}" "${NC}"
+    read -r -p " ${SELECT_OPTION} " CHOICE
+
+    if [ -z "${CHOICE}" ]; then
+        CHOICE=1
+        continue
+    fi
+    case ${CHOICE} in
+    1)
+        clear
+        printf "%s\n" "${RED}${PROCESSING}${NC}"
+        sleep 1
+        if nginx -t; then
+            systemctl restart nginx
+            clear
+            printf "%s\n" "${GREEN}${lang_restart_nginx_success}${NC}"
+            sleep 1
+            echo
+        else
+            nginx -t
+            printf "%s\n" "${RED}${lang_nginx_config_error}${NC}"
+        fi
+
+        lemp_nginx
+        ;;
+    2)
+        clear
+        sleep 1
+        nginx -t
+        sleep 1
+        echo
+        lemp_nginx
+        ;;
+    3)
+        clear
+        NGINX_CURRENT_VERSION=$(nginx -v 2>&1 | grep -o '[0-9.]*$')
+        NGINX_NEW_VERSION=$(curl -s "${UPDATE_LINK}"/version | grep "nginx_version=" | cut -f2 -d'=')
+        if [[ -n "$NGINX_NEW_VERSION" && "$NGINX_NEW_VERSION" != "$NGINX_CURRENT_VERSION" ]]; then
+            _build_nginx "${NGINX_NEW_VERSION}"
+            if nginx -t; then
+                systemctl restart nginx
+                clear
+                printf "%s\n" "${GREEN}Update Nginx successful.${NC}"
+            else
+                clear
+                nginx -t
+                printf "%s\n" "${RED}${lang_nginx_config_error}${NC}"
+            fi
+        else
+            printf "%s\n" "${RED}Khong tim thay phien ban Nginx moi${NC}"
+        fi
+
+        lemp_nginx
+        ;;
+    4)
+        clear
+        NGINX_VERSION=$(curl -s "${UPDATE_LINK}"/version | grep "nginx_version=" | cut -f2 -d'=')
+        _build_nginx "${NGINX_VERSION}"
+
+        CPU_CORES=$(grep -c "processor" /proc/cpuinfo)
+        MAX_CLIENT=$((CPU_CORES * 1024))
+        mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf.orig
+        cat >>"/etc/nginx/nginx.conf" <<EONGINXCONF
+user nginx;
+worker_processes auto;
+worker_rlimit_nofile 260000;
+
+error_log  /var/log/nginx/error.log warn;
+pid        /run/nginx.pid;
+
+events {
+    worker_connections ${MAX_CLIENT};
+    accept_mutex off;
+    accept_mutex_delay 200ms;
+    use epoll;
+    #multi_accept on;
+}
+
+http {
+    index  index.html index.htm index.php;
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    charset utf-8;
+
+    log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                  '\$status \$body_bytes_sent "\$http_referer" '
+                  '"\$http_user_agent" "\$http_x_forwarded_for"';
+
+    access_log  off;
+    server_tokens off;
+
+    sendfile on;
+
+    tcp_nopush on;
+    tcp_nodelay off;
+
+    types_hash_max_size 2048;
+    server_names_hash_bucket_size 128;
+    server_names_hash_max_size 10240;
+    client_max_body_size 1024m;
+    client_body_buffer_size 128k;
+    client_body_in_file_only off;
+    client_body_timeout 60s;
+    client_header_buffer_size 256k;
+    client_header_timeout  20s;
+    large_client_header_buffers 8 256k;
+    keepalive_timeout 15;
+    keepalive_disable msie6;
+    reset_timedout_connection on;
+    send_timeout 60s;
+
+    disable_symlinks if_not_owner from=\$document_root;
+    server_name_in_redirect off;
+
+    open_file_cache max=2000 inactive=20s;
+    open_file_cache_valid 120s;
+    open_file_cache_min_uses 2;
+    open_file_cache_errors off;
+
+    # Limit Request
+    limit_req_status 403;
+    # limit the number of connections per single IP
+    limit_conn_zone \$binary_remote_addr zone=conn_limit_per_ip:10m;
+    # limit the number of requests for a given session
+    limit_req_zone \$binary_remote_addr zone=req_limit_per_ip:10m rate=1r/s;
+
+    # Custom Response Headers
+    more_set_headers 'Server: GITHUB.COM';
+    more_set_headers 'X-Content-Type-Options    "nosniff" always';
+    more_set_headers 'X-XSS-Protection          "1; mode=block" always';
+    more_set_headers 'Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always';
+    more_set_headers 'Referrer-Policy no-referrer-when-downgrade';
+
+    # Custom Variables
+    map \$scheme \$https_suffix { default ''; https '-https'; }
+
+    include /etc/nginx/extra/nginx_cache.conf;
+    include /etc/nginx/extra/gzip.conf;
+    include /etc/nginx/extra/brotli.conf;
+    include /etc/nginx/extra/ssl.conf;
+    include /etc/nginx/extra/cloudflare.conf;
+    include /etc/nginx/web_apps.conf;
+    include /etc/nginx/conf.d/*.conf;
+    include /etc/nginx/redirect/*.conf;
+}
+EONGINXCONF
+
+        if nginx -t; then
+            systemctl restart nginx
+            clear
+            printf "%s\n" "${GREEN}Rebuild Nginx successful.${NC}"
+        else
+            clear
+            nginx -t
+            printf "%s\n" "${RED}${lang_nginx_config_error}${NC}"
+        fi
+        lemp_nginx
+        ;;
+    0)
+        clear
+        menu_lemp
+        ;;
+    *)
+        clear
+        printf "%s\n" "${RED}${WRONG_OPTION}${NC}"
+        ;;
+    esac
+done
