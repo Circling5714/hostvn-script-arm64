@@ -98,7 +98,7 @@ install_requirement(){
         libcrypt-openssl-rsa-perl libnuma-dev libnuma1 git dos2unix ipcalc unzip net-tools wget apache2-utils grc \
         libjpeg-dev libpng-dev libtiff-dev libgif-dev libwebp-dev imagemagick libpcre2-dev uuid-dev \
         gnupg2 ca-certificates lsb-release libxml2-dev libcurl4-openssl-dev liblmdb-dev pkgconf \
-        libyajl-dev apt-utils htop nano supervisor bc libmaxminddb-dev psmisc -y
+        libyajl-dev apt-utils htop nano supervisor bc libmaxminddb-dev psmisc eatmydata -y
 
     service supervisor stop
     _svc disable supervisor
@@ -173,7 +173,14 @@ download_script(){
     fi
     dos2unix "${DIR}/hostvn.run"
     chmod +x "${DIR}/hostvn.run"
-    HOSTVN_SCRIPT_LINK="${SCRIPT_LINK}" HOSTVN_LOCAL_DIR="${LOCAL_DIR}" bash "${DIR}/hostvn.run"
+    # Tren Android: chay toan bo giai doan cai nang (build nginx, MariaDB, PHP, phpMyAdmin,
+    # wp-cli...) duoi eatmydata de khu fsync toan cuc, tranh treo vold -> reboot.
+    # Cai lai duoc nen viec bo dam bao ben vung khi mat dien luc cai la chap nhan duoc.
+    if [ "${HOSTVN_ANDROID}" = "yes" ] && command -v eatmydata >/dev/null 2>&1; then
+        HOSTVN_SCRIPT_LINK="${SCRIPT_LINK}" HOSTVN_LOCAL_DIR="${LOCAL_DIR}" eatmydata bash "${DIR}/hostvn.run"
+    else
+        HOSTVN_SCRIPT_LINK="${SCRIPT_LINK}" HOSTVN_LOCAL_DIR="${LOCAL_DIR}" bash "${DIR}/hostvn.run"
+    fi
 }
 
 welcome

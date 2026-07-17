@@ -101,6 +101,10 @@ _install_imav() {
     elif [[ "$(clamscan --version)" =~ .*"ClamAV".* ]]; then
         clear
         printf "%s\n" "${RED}Ban da cai dat ClamAV roi.${NC}"
+    elif [ "$(uname -m)" != "x86_64" ]; then
+        clear
+        printf "%s\n" "${RED}ImunifyAV chi ho tro kien truc x86_64.${NC}"
+        printf "%s\n" "${RED}Tren ARM64/Android, vui long dung ClamAV thay the.${NC}"
     else
         OS=$(grep -w "ID" "/etc/os-release" | cut -f2 -d'=' | cut -f2 -d'"')
         OS_VER=$(grep "^VERSION_ID=" "/etc/os-release" | cut -f2 -d'=' | cut -f2 -d'"')

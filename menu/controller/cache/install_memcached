@@ -34,8 +34,8 @@ _set_var(){
 }
 
 _install_memcached(){
-    sudo apt-get update -y
-    sudo apt-get install memcached libmemcached-dev libmemcached-tools -y
+    apt-get update -y
+    apt-get install memcached libmemcached-dev libmemcached-tools -y
 
     rm -rf /etc/memcached.conf
     cat >> "/etc/memcached.conf" << END
