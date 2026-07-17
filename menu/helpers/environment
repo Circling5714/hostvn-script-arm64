@@ -124,11 +124,24 @@ _hostvn_db_tmpfs_enabled() {
     [ "${HOSTVN_ANDROID}" = "yes" ] && [ "${HOSTVN_DB_TMPFS:-yes}" = "yes" ]
 }
 
-# Copy nhe nhang: ghi vao tmpfs (RAM) nen chi doc tu dia; sync sau moi file lon
-# de writeback nho giot, tranh burst I/O lam sap vold.
+# Copy nhe nhang GIUA dia va RAM. Tren Android, ngay ca doc/ghi ~100MB lien tuc
+# tren storage ma hoa cung lam nghen vold -> reboot. Nen THROTTLE bang rsync --bwlimit
+# (mac dinh 6MB/s) de vold co khe xu ly I/O; fallback tar theo tung phan neu khong co rsync.
+HOSTVN_COPY_BWLIMIT="${HOSTVN_COPY_BWLIMIT:-6000}"   # KB/s
 _hostvn_gentle_copy() {
     local src="$1" dst="$2"
-    ( cd "$src" 2>/dev/null && tar cf - . 2>/dev/null ) | ( cd "$dst" 2>/dev/null && tar xf - 2>/dev/null )
+    mkdir -p "$dst"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --bwlimit="${HOSTVN_COPY_BWLIMIT}" "$src"/ "$dst"/ 2>/dev/null
+    else
+        # Khong co rsync: copy tung muc con + sync + nghi ngan de gian I/O
+        ( cd "$src" 2>/dev/null || return
+          for f in * .[!.]*; do
+              [ -e "$f" ] || continue
+              cp -a "$f" "$dst"/ 2>/dev/null
+              sync; sleep 0.3
+          done )
+    fi
     sync
 }
 
@@ -151,14 +164,12 @@ _hostvn_db_tmpfs_mount() {
     return 0
 }
 
-# Dong bo datadir tmpfs -> dia (goi luc stop va dinh ky qua cron)
+# Dong bo datadir tmpfs -> dia (goi luc stop va dinh ky qua cron) - THROTTLE de tranh burst
 _hostvn_db_persist() {
     _hostvn_db_tmpfs_enabled || return 0
     mountpoint -q "${HOSTVN_DB_DIR}" 2>/dev/null || return 0
     [ -d "${HOSTVN_DB_DIR}/mysql" ] || return 0
-    mkdir -p "${HOSTVN_DB_PERSIST}"
-    cp -a "${HOSTVN_DB_DIR}/." "${HOSTVN_DB_PERSIST}/" 2>/dev/null
-    sync
+    _hostvn_gentle_copy "${HOSTVN_DB_DIR}" "${HOSTVN_DB_PERSIST}"
 }
 
 [ -z "${HOSTVN_INIT}" ] && _hostvn_detect_env
