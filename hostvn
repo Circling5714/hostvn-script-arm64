@@ -795,6 +795,12 @@ php_parameter() {
         PM_MAX_CHILDREN=$((CPU_CORES * 5))
         PM_MAX_REQUEST=500
     fi
+
+    # Android: gioi han so worker php-fpm (moi worker ~50-100MB) de tranh can RAM -> OOM
+    if [ "${HOSTVN_ANDROID}" = "yes" ]; then
+        [ "${PM_MAX_CHILDREN}" -gt 8 ] && PM_MAX_CHILDREN=8
+        PM_MAX_REQUEST=500
+    fi
 }
 
 mariadb_calculation() {
@@ -1034,6 +1040,21 @@ mariadb_calculation() {
         sort_buffer="384M"
         read_buffer="384M"
         write_buffer="384M"
+    fi
+
+    # Android: he dieu hanh Android da chiem phan lon RAM vat ly, nen sizing theo
+    # MemTotal (mariadb_calculation o tren) la QUA TAY -> composer/php + buffer pool
+    # lam can RAM -> lmkd giet vold -> reboot "vold-failed". Ep cac vung nho lon xuong
+    # muc an toan cho container (~2GB kha dung thuc te).
+    if [ "${HOSTVN_ANDROID}" = "yes" ]; then
+        innodb_buffer_pool_size="128M"
+        innodb_log_file_size="64M"
+        innodb_log_buffer_size="8M"
+        query_cache_size="16M"
+        tmp_table_size="32M"
+        max_heap_table_size="32M"
+        max_connections="50"
+        key_buffer_size="32M"
     fi
 }
 
@@ -2778,6 +2799,16 @@ install_rclone() {
 }
 
 install_wp_cli_packages() {
+    # Android: KHONG dat memory_limit=-1 va BO QUA 'wp package install'.
+    # 'wp package install' goi Composer (giai dependency) -> bung RAM rat lon; ket hop
+    # memory_limit=-1 tren thiet bi RAM thap -> OOM -> lmkd giet vold -> reboot vold-failed.
+    # Day la 2 package tro giup khong bat buoc (rename-db-prefix, wp-revisions-cli);
+    # nguoi dung co the tu cai sau bang: wp package install <ten> --allow-root
+    if [ "${HOSTVN_ANDROID}" = "yes" ]; then
+        printf "%s\n" "Android: bo qua cai wp-cli package (Composer) de tranh OOM/reboot. Cai thu cong sau neu can."
+        return 0
+    fi
+
     sed -i '/memory_limit/d' "$PHP1_INI_PATH"/00-hostvn-custom.ini
     sed -i '/memory_limit/d' "$PHP1_CLI_PATH"/00-hostvn-custom.ini
     echo "memory_limit = -1" >>"$PHP1_INI_PATH"/00-hostvn-custom.ini
