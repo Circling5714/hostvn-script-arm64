@@ -354,7 +354,7 @@ install_nginx(){
         "--add-module=../nginx-module-vts-${nginx_module_vts_v}" \
         "--with-cc-opt='-D FD_SETSIZE=32768'"
 
-    make -j"$(nproc)" && make install
+    make -j"$(_build_jobs)" && make install
 
     # Fail fast: khong co binary nginx thi cac buoc sau deu vo nghia
     if [ ! -x "/usr/sbin/nginx" ]; then

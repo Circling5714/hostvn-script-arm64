@@ -665,7 +665,7 @@ if [[ ! -d "${MODULE_PATH}/headers-more-nginx-module-${more_clear_headers_v}" ]]
         "--add-module=../nginx-module-vts-${nginx_module_vts_v}" \
         "--with-cc-opt='-D FD_SETSIZE=32768'"
 
-        make -j"$(nproc)" && make install
+        make -j"$(_build_jobs)" && make install
         
         CPU_CORES=$(grep -c "processor" /proc/cpuinfo)
         MAX_CLIENT=$((CPU_CORES * 1024))
