@@ -435,8 +435,24 @@ EOmariadb_sources
         printf "${RED}%s${NC}\n" "Script se cai dat MariaDB tu kho goi cua Ubuntu."
     fi
 
+    # Tren Android/container: tat native AIO (libaio/io_uring) cua InnoDB TRUOC khi cai.
+    # Kernel Android (4.14) co the panic/reboot khi InnoDB dung async IO. mariadb-install-db
+    # trong postinst khoi tao InnoDB ngay khi cai -> phai co config nay san truoc do.
+    if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
+        mkdir -p /etc/mysql/conf.d
+        cat > /etc/mysql/conf.d/99-hostvn-container.cnf <<EOF
+[mysqld]
+innodb_use_native_aio = 0
+innodb_flush_method = fsync
+EOF
+        # Chan postinst tu dong start service (chroot khong co init; ta se start bang _svc)
+        printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d
+        chmod +x /usr/sbin/policy-rc.d
+    fi
+
     apt-get update -y
     apt-get -y install mariadb-server mariadb-backup
+    [ "${HOSTVN_CONTAINER}" = "yes" ] && rm -f /usr/sbin/policy-rc.d
 }
 
 install_php() {
