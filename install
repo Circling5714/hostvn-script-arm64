@@ -14,6 +14,12 @@
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
+# HostVN ARM64: ap dung harden SOM (nobarrier + vm.dirty + oom + dpkg force-unsafe-io)
+# TRUOC ca 'apt upgrade' dau tien. Tren Android, apt/dpkg fsync + barrier khi cai goi co
+# the lam nghen 'vold' -> reboot; source environment se tu phat hien va giam thieu.
+_HVN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "${_HVN_DIR}/menu/helpers/environment" ] && source "${_HVN_DIR}/menu/helpers/environment" 2>/dev/null
+
 apt update -y
 apt -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" upgrade -y
 apt autoremove -y
