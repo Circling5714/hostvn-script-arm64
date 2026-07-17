@@ -97,6 +97,13 @@ _hostvn_harden_android_io() {
     #    Neu he thong het RAM, kernel/lmkd se giet tien trinh CUA container (cai dat / dich
     #    vu - phuc hoi duoc) TRUOC, thay vi giet 'vold' (score rat thap) -> tranh reboot.
     [ -w /proc/self/oom_score_adj ] && echo 1000 > /proc/self/oom_score_adj 2>/dev/null
+
+    # 4) dpkg khong fsync (force-unsafe-io): pha cai goi (apt/dpkg) trong script 'ubuntu'
+    #    KHONG duoc bao boi eatmydata (chi hostvn.run duoc bao). dpkg fsync moi goi khi
+    #    cai 300+ goi -> nghen vold -> reboot. force-unsafe-io khu fsync cho MOI dpkg.
+    if [ -d /etc/dpkg/dpkg.cfg.d ] && [ ! -f /etc/dpkg/dpkg.cfg.d/hostvn-unsafe-io ]; then
+        echo 'force-unsafe-io' > /etc/dpkg/dpkg.cfg.d/hostvn-unsafe-io 2>/dev/null
+    fi
 }
 
 # ---------------------------------------------------------------
@@ -117,19 +124,30 @@ _hostvn_db_tmpfs_enabled() {
     [ "${HOSTVN_ANDROID}" = "yes" ] && [ "${HOSTVN_DB_TMPFS:-yes}" = "yes" ]
 }
 
-# Gan tmpfs len datadir + seed tu ban persist tren dia (goi trong _svc mariadb start)
+# Copy nhe nhang: ghi vao tmpfs (RAM) nen chi doc tu dia; sync sau moi file lon
+# de writeback nho giot, tranh burst I/O lam sap vold.
+_hostvn_gentle_copy() {
+    local src="$1" dst="$2"
+    ( cd "$src" 2>/dev/null && tar cf - . 2>/dev/null ) | ( cd "$dst" 2>/dev/null && tar xf - 2>/dev/null )
+    sync
+}
+
+# Gan tmpfs len datadir + seed tu ban persist tren dia (goi trong _svc mariadb start
+# VA truoc khi cai mariadb-server de DB fresh sinh ra ngay tren tmpfs).
 _hostvn_db_tmpfs_mount() {
     _hostvn_db_tmpfs_enabled || return 0
     mountpoint -q "${HOSTVN_DB_DIR}" 2>/dev/null && return 0   # da la tmpfs
-    mkdir -p "${HOSTVN_DB_PERSIST}"
-    # Lan dau chuyen tu dia sang RAM: neu persist trong ma datadir da co du lieu -> seed persist
+    # Migration lan dau: neu datadir tren DIA da co du lieu ma persist chua co ->
+    # RENAME (mv, tuc thi, KHONG copy) de tranh burst I/O copy disk->disk lam sap vold.
     if [ ! -d "${HOSTVN_DB_PERSIST}/mysql" ] && [ -d "${HOSTVN_DB_DIR}/mysql" ]; then
-        cp -a "${HOSTVN_DB_DIR}/." "${HOSTVN_DB_PERSIST}/" 2>/dev/null
+        rm -rf "${HOSTVN_DB_PERSIST}" 2>/dev/null
+        mv "${HOSTVN_DB_DIR}" "${HOSTVN_DB_PERSIST}" 2>/dev/null
     fi
+    mkdir -p "${HOSTVN_DB_DIR}" "${HOSTVN_DB_PERSIST}"
     mount -t tmpfs -o "size=${HOSTVN_DB_TMPFS_SIZE},mode=0755" tmpfs "${HOSTVN_DB_DIR}" 2>/dev/null || return 1
     chown mysql:mysql "${HOSTVN_DB_DIR}" 2>/dev/null
-    # Seed RAM tu ban persist tren dia
-    [ -d "${HOSTVN_DB_PERSIST}/mysql" ] && cp -a "${HOSTVN_DB_PERSIST}/." "${HOSTVN_DB_DIR}/" 2>/dev/null
+    # Seed RAM tu ban persist (chi DOC tu dia, GHI vao RAM) - copy nhe nhang
+    [ -d "${HOSTVN_DB_PERSIST}/mysql" ] && _hostvn_gentle_copy "${HOSTVN_DB_PERSIST}" "${HOSTVN_DB_DIR}"
     return 0
 }
 

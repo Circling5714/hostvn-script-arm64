@@ -461,6 +461,13 @@ EOF
         chmod +x /usr/sbin/policy-rc.d
     fi
 
+    # Android: gan tmpfs len /var/lib/mysql TRUOC khi cai mariadb-server, de postinst
+    # (mariadb-install-db) khoi tao datadir NGAY tren RAM. Nho vay khong bao gio phai
+    # copy datadir dia->RAM (burst I/O lam sap vold). DB "sinh ra" tren tmpfs.
+    if [ "${HOSTVN_ANDROID}" = "yes" ]; then
+        type _hostvn_db_tmpfs_mount >/dev/null 2>&1 && _hostvn_db_tmpfs_mount
+    fi
+
     apt-get update -y
     apt-get -y install mariadb-server mariadb-backup
     [ "${HOSTVN_CONTAINER}" = "yes" ] && rm -f /usr/sbin/policy-rc.d
@@ -3840,12 +3847,17 @@ printf "========================================================================
 # Trong container/chroot (Android, LXC...): khong reboot -> phai khoi dong
 # dich vu tuong minh (khong co systemd autostart).
 if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
-    printf "%s\n" "Moi truong container - khoi dong dich vu..."
-    _svc_active mariadb || _svc start mariadb
+    printf "%s\n" "Moi truong container - khoi dong dich vu (tuan tu, nhe nhang)..."
+    # Khoi dong TUNG dich vu mot, co 'sync' + nghi giua cac buoc de tranh burst I/O
+    # dong thoi (tren Android burst nay lam sap vold -> reboot). MariaDB chay tren
+    # tmpfs (RAM) nen _svc restart mariadb se tu gan tmpfs + seed tu ban persist.
+    _svc restart mariadb
+    sync; sleep 2
     _svc restart "php${PHP_VERSION}-fpm"
-    [ "${PHP2_RELEASE}" = "yes" ] && _svc restart "php${PHP_VERSION_2}-fpm"
+    sync; sleep 2
+    if [ "${PHP2_RELEASE}" = "yes" ]; then _svc restart "php${PHP_VERSION_2}-fpm"; sync; sleep 2; fi
     _svc restart nginx
-    sleep 1
+    sync; sleep 2
     ng_st=$(_svc is-active nginx); db_st=$(_svc is-active mariadb); php_st=$(_svc is-active "php${PHP_VERSION}-fpm")
     printf "${GREEN}%s${NC}\n" "Cai dat hoan tat. Nginx: ${ng_st} | MariaDB: ${db_st} | PHP: ${php_st}"
     printf "%s\n" "Go 'hostvn' de mo menu quan ly."
