@@ -92,6 +92,11 @@ _hostvn_harden_android_io() {
         echo 300     > /proc/sys/vm/dirty_expire_centisecs 2>/dev/null  # 3s
         echo 100     > /proc/sys/vm/dirty_writeback_centisecs 2>/dev/null # 1s
     fi
+
+    # 3) Luoi an toan OOM: dat oom_score_adj=1000 cho tien trinh nay (va cac con ke thua).
+    #    Neu he thong het RAM, kernel/lmkd se giet tien trinh CUA container (cai dat / dich
+    #    vu - phuc hoi duoc) TRUOC, thay vi giet 'vold' (score rat thap) -> tranh reboot.
+    [ -w /proc/self/oom_score_adj ] && echo 1000 > /proc/self/oom_score_adj 2>/dev/null
 }
 
 [ -z "${HOSTVN_INIT}" ] && _hostvn_detect_env
