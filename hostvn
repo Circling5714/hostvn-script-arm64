@@ -21,6 +21,7 @@ DIR=$(pwd)
 
 # Set Color
 RED='\033[0;31m'
+GREEN='\033[0;32m'
 NC='\033[0m'
 
 SCRIPTS_VERSION="1.0.0"
@@ -318,6 +319,14 @@ install_nginx(){
         exit 1
     fi
 
+    # Bo qua build neu da co nginx dung phien ban (rerun cai dat, tranh compile lai
+    # rat lau tren thiet bi ARM/dien thoai)
+    if [ -x /usr/sbin/nginx ] && /usr/sbin/nginx -v 2>&1 | grep -q "nginx/${NGINX_VERSION}"; then
+        printf "%s\n" "Nginx ${NGINX_VERSION} da duoc build san. Bo qua buoc compile."
+        _setup_nginx_service
+        return 0
+    fi
+
     cd_dir "${MODULE_PATH}"
     wget -O- https://nginx.org/download/nginx-"${NGINX_VERSION}".tar.gz | tar -xz
     # Fork nginx-modules/ngx_cache_purge tuong thich nginx moi (FRiCKLE goc da ngung phat trien)
@@ -363,12 +372,21 @@ install_nginx(){
         exit 1
     fi
 
+    _setup_nginx_service
+    cd_dir "${DIR}"
+}
+
+# Tao nginx user + systemd unit (khi co systemd) + enable/start qua _svc.
+# Tach rieng de dung lai o duong bo qua build (rerun).
+_setup_nginx_service() {
     if [[ -d "/usr/lib/nginx/modules" && ! -d "/etc/nginx/modules" ]]; then
         ln -s /usr/lib/nginx/modules /etc/nginx/modules
     fi
 
-    adduser --system --home /nonexistent --shell /bin/false --no-create-home --disabled-login --disabled-password \
-        --gecos "nginx user" --group nginx
+    if ! id nginx >/dev/null 2>&1; then
+        adduser --system --home /nonexistent --shell /bin/false --no-create-home --disabled-login --disabled-password \
+            --gecos "nginx user" --group nginx
+    fi
 
     rm -rf /etc/systemd/system/nginx.service
     cat >> "/etc/systemd/system/nginx.service" << EOnginx_service
@@ -392,8 +410,6 @@ WantedBy=multi-user.target
 EOnginx_service
 
     _svc enable nginx.service
-    _svc start nginx.service
-    cd_dir "${DIR}"
 }
 
 install_mariadb() {
@@ -3737,11 +3753,19 @@ printf "${RED}%s${NC}\n" "Muon an IP VPS, dua moi website qua Cloudflare Tunnel 
 printf "${RED}%s${NC}\n" "Bat NGAY sau khi cai (khi chua them website): hostvn > Quan ly VPS > 11. Cloudflare Tunnel"
 printf "=========================================================================\n"
 
-# Trong container/chroot (Android, LXC...) khong reboot duoc va khong can;
-# cac service da chay qua _svc. Chi reboot tren may that.
+# Tren may that: reboot de systemd tu khoi dong dich vu.
+# Trong container/chroot (Android, LXC...): khong reboot -> phai khoi dong
+# dich vu tuong minh (khong co systemd autostart).
 if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
-    printf "${RED}%s${NC}\n" "Moi truong container - khong reboot. Cai dat da hoan tat."
-    printf "%s\n" "Cac dich vu (nginx/mariadb/php-fpm) da duoc khoi dong. Go 'hostvn' de mo menu."
+    printf "%s\n" "Moi truong container - khoi dong dich vu..."
+    _svc_active mariadb || _svc start mariadb
+    _svc restart "php${PHP_VERSION}-fpm"
+    [ "${PHP2_RELEASE}" = "yes" ] && _svc restart "php${PHP_VERSION_2}-fpm"
+    _svc restart nginx
+    sleep 1
+    ng_st=$(_svc is-active nginx); db_st=$(_svc is-active mariadb); php_st=$(_svc is-active "php${PHP_VERSION}-fpm")
+    printf "${GREEN}%s${NC}\n" "Cai dat hoan tat. Nginx: ${ng_st} | MariaDB: ${db_st} | PHP: ${php_st}"
+    printf "%s\n" "Go 'hostvn' de mo menu quan ly."
 else
     sleep 3
     shutdown -r now
