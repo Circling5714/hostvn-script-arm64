@@ -498,6 +498,15 @@ install_php() {
         apt -y install php"${PHP_VERSION}"-json
     fi
 
+    # Self-heal: neu cai lai tren moi truong da tung 'rm -rf /etc/php' (dpkg van danh
+    # dau da cai -> khong phuc hoi conffile da xoa), php-fpm.conf/pool.d se thieu ->
+    # php-fpm khong khoi dong. Ep dpkg phuc hoi conffile con thieu bang --force-confmiss.
+    if [ ! -f "/etc/php/${PHP_VERSION}/fpm/php-fpm.conf" ]; then
+        printf "%s\n" "Phat hien config PHP thieu (cai lai) - phuc hoi bang --force-confmiss..."
+        apt-get install --reinstall -y -o Dpkg::Options::="--force-confmiss" \
+            $(dpkg -l "php${PHP_VERSION}-*" 2>/dev/null | awk '/^ii/{print $2}')
+    fi
+
     if [ "${PHP_VERSION}" == "5.6" ]; then
         apt -y install php5.6-mcrypt
     fi
