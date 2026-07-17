@@ -41,8 +41,9 @@ Toàn bộ tính năng bản VPS được giữ: Nginx 1.30 (HTTP/2+3, brotli, v
    - `mount -o remount,nobarrier /` — chặn **barrier/FLUSH của chính ext4 journal** (do *kernel* phát khi tạo/xoá nhiều file — composer, `wp package install`, giải nén). eatmydata **không** chặn được lớp này.
    - `vm.dirty_bytes=8MB`, `dirty_background_bytes=4MB` — ép writeback **nhỏ giọt** thay vì để kernel dồn ~1GB (mặc định `dirty_ratio=20%`) rồi flush một cục làm nghẽn storage.
 3. **Cấu hình InnoDB an toàn cho Android** — `innodb_flush_method=fsync` (không O_DIRECT), `innodb_doublewrite=0`, `innodb_flush_neighbors=0`, `innodb_flush_log_at_trx_commit=0`, io_capacity thấp.
+4. **Chống OOM (hết RAM cũng gây `vold-failed`)** — Android đã chiếm ~3/5.4GB nên không thể cấp phát theo tổng RAM vật lý. Trên Android: cap `innodb_buffer_pool_size=128M`, `max_connections=50`, php-fpm `pm.max_children≤8`, và **bỏ qua `wp package install`** (Composer giải dependency + `memory_limit=-1` là thủ phạm làm bung RAM → `lmkd` giết `vold` → reboot). Hai package wp-cli đó không bắt buộc, cài thủ công sau nếu cần.
 
-> **Kiểm chứng:** (a) ghi **3.200.000 dòng InnoDB** liên tục dưới eatmydata; (b) **3 vòng tạo+xoá 30.000 file + `dd` 2GB** dưới nobarrier+vm.dirty — **đều không reboot** (cùng workload này reboot ngay khi chưa có fix). Chẩn đoán: `bootreason` luôn là `reboot,vold-failed`, máy **mát** (không phải nhiệt).
+> **Kiểm chứng:** (a) ghi **3.200.000 dòng InnoDB** liên tục dưới eatmydata; (b) **3 vòng tạo+xoá 30.000 file + `dd` 2GB** dưới nobarrier+vm.dirty — **đều không reboot** (cùng workload này reboot ngay khi chưa có fix); (c) reboot cuối cùng đúng tại bước Composer → xác nhận là OOM. Chẩn đoán: `bootreason` luôn là `reboot,vold-failed`, máy **mát** (không phải nhiệt).
 
 **Đánh đổi (cần biết):** khử fsync + nobarrier làm **giảm bảo đảm bền vững (durability)** khi mất điện đột ngột — có cửa sổ mất dữ liệu vài giây và rủi ro hỏng InnoDB/FS nếu cúp điện đúng lúc ghi. Với một node web chạy trên điện thoại (edge/thử nghiệm), đây là đánh đổi chấp nhận được để máy không reboot. Khuyến nghị: **cắm nguồn ổn định** (hoặc pin còn tốt) và **backup định kỳ** (menu backup Rclone/S3 có sẵn).
 
