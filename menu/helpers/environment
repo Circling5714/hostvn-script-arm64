@@ -289,10 +289,12 @@ _svc_manual() {
             esac ;;
 
         memcached)
+            # KHONG dung '-d' (daemonize cua memcached khong song trong container/chroot -
+            # tien trinh thoat sau khi fork). Chay foreground + setsid de nen (nhu cac service khac).
             case "${action}" in
-                start)   [ -x /usr/bin/memcached ] && setsid /usr/bin/memcached -d -u nobody 2>/dev/null < /dev/null & ;;
+                start)   [ -x /usr/bin/memcached ] && setsid /usr/bin/memcached -u nobody -m 64 -l 127.0.0.1 </dev/null >/dev/null 2>&1 & ;;
                 stop)    pkill -x memcached ;;
-                restart) pkill -x memcached 2>/dev/null; sleep 1; setsid /usr/bin/memcached -d -u nobody 2>/dev/null < /dev/null & ;;
+                restart) pkill -x memcached 2>/dev/null; sleep 1; setsid /usr/bin/memcached -u nobody -m 64 -l 127.0.0.1 </dev/null >/dev/null 2>&1 & ;;
                 is-active) pgrep -x memcached >/dev/null && echo active || { echo inactive; return 3; } ;;
             esac ;;
 
