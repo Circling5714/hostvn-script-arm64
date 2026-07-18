@@ -144,10 +144,18 @@ CF_TUNNEL_ID="${tunnel_id}"
 EOF
     chmod 600 "${CONF}"
 
-    # Chay cloudflared bang tunnel token (systemd)
-    cloudflared service install "${tunnel_token}" >/dev/null 2>&1
+    # Luu tunnel token de khoi dong lai duoc (che do manual doc file nay qua _svc cloudflared)
+    mkdir -p /etc/cloudflared
+    printf '%s' "${tunnel_token}" > /etc/cloudflared/hostvn-token
+    chmod 600 /etc/cloudflared/hostvn-token
+    # Che do systemd: cai thanh service (token baked vao unit).
+    # Che do manual (chroot/Android): _svc se chay 'cloudflared tunnel run --token' voi token da luu.
+    if [ "${HOSTVN_INIT}" = "systemd" ]; then
+        cloudflared service install "${tunnel_token}" >/dev/null 2>&1
+    fi
     _svc enable cloudflared >/dev/null 2>&1
     _svc restart cloudflared >/dev/null 2>&1
+    sleep 3
 
     # Cau hinh nginx nhan dien IP that + an toan fail2ban
     _config_real_ip
@@ -178,14 +186,20 @@ EOF
         printf "%s\n" "${RED}KHONG con hieu luc. Hay bat 'Dong bo Cloudflare WAF' (menu Firewall > 10)${NC}"
         printf "%s\n" "${RED}de fail2ban chan IP tan cong ngay tai edge Cloudflare.${NC}"
     else
-        printf "%s\n" "${RED}cloudflared khong chay duoc. Kiem tra: journalctl -u cloudflared${NC}"
+        printf "%s\n" "${RED}cloudflared khong chay duoc.${NC}"
+        if [ "${HOSTVN_INIT}" = "systemd" ]; then
+            printf "%s\n" "${RED}Kiem tra: journalctl -u cloudflared${NC}"
+        else
+            printf "%s\n" "${RED}Chay thu de xem loi: cloudflared tunnel run --token \$(cat /etc/cloudflared/hostvn-token)${NC}"
+        fi
     fi
 }
 
 _disable() {
     _svc stop cloudflared >/dev/null 2>&1
     _svc disable cloudflared >/dev/null 2>&1
-    cloudflared service uninstall >/dev/null 2>&1
+    [ "${HOSTVN_INIT}" = "systemd" ] && cloudflared service uninstall >/dev/null 2>&1
+    rm -f /etc/cloudflared/hostvn-token
     rm -f "${CONF}"
     sed -i '/network_mode=/d' "${FILE_INFO}"
     echo "network_mode=direct" >> "${FILE_INFO}"
