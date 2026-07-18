@@ -850,6 +850,47 @@ def perm_apply_all() -> tuple[bool, str]:
     return True, _ctl_reason(out, "Đã phân quyền lại toàn bộ website.")
 
 
+WPCTL = "/var/hostvn/menu/controller/wordpress"
+
+
+def wp_domains() -> list[str]:
+    """Giong _select_wordpress_website: domain co public_html/wp-content, theo thu tu glob."""
+    out = []
+    for d in _glob_domains():
+        u = read_user_conf(d).get("username", "")
+        if u and Path(f"/home/{u}/{d}/public_html/wp-content").is_dir():
+            out.append(d)
+    return out
+
+
+def wp_index(domain: str) -> int:
+    lst = wp_domains()
+    return lst.index(domain) + 1 if domain in lst else 0
+
+
+def wp_info(domain: str) -> str:
+    """Thong tin WordPress cua 1 site (doc bang wp-cli)."""
+    dr = docroot(domain)
+    if not dr or not Path(dr, "wp-includes").is_dir():
+        return "Site này không dùng WordPress."
+    def wp(cmd, t=40):
+        return sh(f"cd {shlex.quote(dr)} && wp {cmd} --allow-root 2>/dev/null", t).strip()
+    ver = wp("core version")
+    upd = wp("core check-update --field=version --format=csv") or "(đã mới nhất)"
+    plug = wp("plugin list --status=active --format=count") or "?"
+    pupd = wp("plugin list --update=available --format=count") or "0"
+    theme = wp("theme list --status=active --field=name --format=csv")
+    return (f"WordPress : {ver}\n"
+            f"Bản mới   : {upd}\n"
+            f"Theme     : {theme or '?'}\n"
+            f"Plugin bật: {plug}  ·  cần update: {pupd}")
+
+
+def wp_run(ctl: str, seq: str, timeout: int = 300) -> str:
+    """Chay 1 controller wordpress voi chuoi tra loi canned."""
+    return _ctl_reason(run_ctl(seq, f"{WPCTL}/{ctl}", timeout), "Đã chạy xong.")
+
+
 def php_versions() -> list[str]:
     out = sh("ls /etc/php 2>/dev/null", 10)
     return sorted(x for x in out.split() if x[:1].isdigit())

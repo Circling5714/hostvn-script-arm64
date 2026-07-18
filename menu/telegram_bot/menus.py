@@ -172,10 +172,56 @@ def db_menu() -> InlineKeyboardMarkup:
 
 
 def wp_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '7. Quan ly WordPress' (10 muc) cua shell."""
     return rows_menu([
-        [(f"{C.E['list']} Site WordPress", "a|wp_list")],
+        [(f"{C.E['list']} Site WordPress", "a|wp_list"),
+         (f"{C.E['info']} Thông tin site", "a|wp_info")],
+        [(f"{C.E['add']} Cài WordPress tự động", "a|wp_install")],
+        [(f"{C.E['refresh']} Update WordPress Core", "a|wp_core")],
+        [("🧩 Plugins manager", "a|wp_plugins")],
+        [(f"{C.E['db']} Tối ưu Database", "a|wp_optimize")],
+        [(f"{C.E['key']} Đổi mật khẩu wp-admin", "a|wp_pass")],
+        [("📦 Move wp-config", "a|wp_moveconf"),
+         ("🔐 Bảo vệ wp-admin", "a|wp_htpasswd")],
+        [("✏️ Sửa theme/plugin", "a|wp_edit"),
+         ("🔒 Lockdown", "a|wp_lockdown")],
         [(f"{C.E['cache']} Xoá cache WP", "a|wp_cache")],
+        [("⚙️ Nâng cao", "m|wpadv")],
     ])
+
+
+def wp_plugins_menu(back: str = "m|wp") -> InlineKeyboardMarkup:
+    """Mirror wordpress_plugins_manage (2 muc)."""
+    return rows_menu([
+        [(f"{C.E['refresh']} Update plugins", "a|wp_plugupd")],
+        [(f"{C.E['off']} Huỷ kích hoạt toàn bộ plugins", "a|wp_plugoff")],
+    ], back=back)
+
+
+def wp_adv_menu(back: str = "m|wp") -> InlineKeyboardMarkup:
+    """Mirror wordpress_advanced (11 muc)."""
+    return rows_menu([
+        [("🟠 Yoast SEO config", "a|wpa_yoast"),
+         ("🟣 Rank Math config", "a|wpa_rank")],
+        [("🖼️ WebP Express", "a|wpa_webp"),
+         (f"{C.E['cache']} Nginx + plugin cache", "a|wpa_cacheplug")],
+        [("🔑 Thêm cache key", "a|wpa_cachekey")],
+        [("🐞 Debug mode", "a|wpa_debug"),
+         ("🛠️ Chế độ bảo trì", "a|wpa_maint")],
+        [("🚫 Disable XMLRPC", "a|wpa_xmlrpc"),
+         ("🙅 Block User API", "a|wpa_userapi")],
+        [("⏰ WP-Cron", "a|wpa_cron"),
+         ("🗑️ Xoá Post Revisions", "a|wpa_revision")],
+    ], back=back)
+
+
+def wp_onoff_menu(key: str, domain: str, on_lbl: str, off_lbl: str,
+                  back: str = "m|wp") -> InlineKeyboardMarkup:
+    """Chon 1/2 cho controller toggle -> wp|<key>|<domain>|<1|2>."""
+    return rows_menu([
+        [(f"{C.E['on']} {on_lbl}", f"wp|{key}|{domain}|2"),
+         (f"{C.E['off']} {off_lbl}", f"wp|{key}|{domain}|1")],
+    ], back=back)
 
 
 def ssl_menu() -> InlineKeyboardMarkup:
