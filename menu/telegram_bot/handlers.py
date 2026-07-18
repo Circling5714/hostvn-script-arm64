@@ -34,7 +34,8 @@ WRITE_ACTIONS = {"dom_add", "db_add", "cache_clear", "opcache_clear", "php_resta
                  "ssl_renew", "ssl_cfapi",
                  "cache_clear_all", "cache_mc", "cache_redis",
                  "cache_opcache", "cache_fastcgi",
-                 "fw_ban", "fw_unban", "fw_jails"}
+                 "fw_ban", "fw_unban", "fw_jails",
+                 "perm_one", "perm_all"}
 
 
 # --------------------------------------------------------------------------- #
@@ -191,6 +192,12 @@ def _screen_php():
     return title(E["php"], f"PHP {hostvn.php_version()}", ""), menus.php_menu()
 
 
+def _screen_perm():
+    return (title(E["perm"], "Phân quyền Chown/Chmod",
+                  "Đặt lại quyền chuẩn: thư mục 755, file 644, chủ sở hữu là user của website."),
+            menus.perm_menu())
+
+
 def _screen_lemp():
     pv = hostvn.php_version()
     st = hostvn.services_status(["nginx", "mariadb", f"php{pv}-fpm"])
@@ -258,7 +265,7 @@ GROUP_SCREENS = {
     C.F_SSL: _screen_ssl, C.F_CACHE: _screen_cache, C.F_BACKUP: _screen_backup,
     C.F_FW: _screen_fw, C.F_PHP: _screen_php, C.F_SVC: _screen_svc,
     C.F_SYS: _screen_sys, C.F_VPS: _screen_vps, C.F_TOOL: _screen_tool,
-    C.F_LEMP: _screen_lemp,
+    C.F_LEMP: _screen_lemp, C.F_PERM: _screen_perm,
     # man phu (mo qua "m|nginx" / "m|log", khong nam o menu chinh)
     "nginx": _screen_nginx, "log": _screen_log,
 }
@@ -387,6 +394,12 @@ async def cb_action(update, context, action, params):
             update, context, "fw_ban" if ban else "fw_unban", "m|fw",
             "⛔" if ban else "🔓", "Ban IP" if ban else "Unban IP",
             f"Nhập <b>địa chỉ IP</b> muốn {'chặn' if ban else 'gỡ chặn'} (vd: 1.2.3.4):")
+    if action == "perm_all":
+        return await q.edit_message_text(
+            title(E["warn"], "Phân quyền TOÀN BỘ website",
+                  "Đặt lại quyền cho <b>tất cả</b> website (thư mục 755, file 644, chown về "
+                  "user của từng site). Với nhiều site có thể mất vài phút. Tiếp tục?"),
+            parse_mode=HTML, reply_markup=menus.confirm_menu("permall", back="m|perm"))
     if action == "fw_jails":
         return await q.edit_message_text(
             title(E["warn"], "Bật thêm jail",
@@ -502,6 +515,10 @@ async def cb_action(update, context, action, params):
                          ("🌟", "Wildcard SSL", "Chọn domain gốc:")),
         "ssl_remove":   (hostvn.list_domains, "ssldel", E["ssl"], "m|ssl",
                          (E["del"], "Gỡ Let's Encrypt", "Chọn domain:")),
+        "perm_check":   (hostvn.list_domains, "permchk", E["perm"], "m|perm",
+                         (E["perm"], "Kiểm tra quyền", "Chọn website:")),
+        "perm_one":     (hostvn.list_domains, "permone", E["perm"], "m|perm",
+                         (E["key"], "Phân quyền 1 website", "Chọn website:")),
         "ssl_alias":    (hostvn.list_domains, "sslalias", E["ssl"], "m|ssl",
                          ("🔗", "SSL cho Alias domain", "Chọn domain chính:")),
     }
@@ -802,6 +819,20 @@ async def cb_pick(update, context, action, params):
         return await start_flow(update, context, flow, "m|domain", emo,
                                 f"{head} — {target}", prompt)
 
+    if action == "permchk":
+        return await _progress_op(
+            update, True, f"{E['perm']} <b>Đang kiểm tra quyền</b> {texts.esc(target)}…",
+            asyncio.to_thread(hostvn.perm_check, target),
+            lambda t: (title(E["perm"], f"Quyền: {target}", pre(t)),
+                       menus.back_only("m|perm")), est=15.0)
+    if action == "permone":
+        if not can_write(chat):
+            return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                             reply_markup=menus.back_only("m|perm"))
+        return await q.edit_message_text(
+            title(E["warn"], "Xác nhận phân quyền",
+                  f"Đặt lại quyền cho <b>{texts.esc(target)}</b>?"),
+            parse_mode=HTML, reply_markup=menus.confirm_menu("permone", target, back="m|perm"))
     if action == "bkdom":     # chon website -> chon loai backup
         if not can_write(chat):
             return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
@@ -1258,6 +1289,23 @@ async def cb_yes(update, context, what, params):
             stages=[(40, f"{E['del']} <b>Xoá vHost &amp; PHP pool</b>…"),
                     (70, f"{E['del']} <b>Xoá user, thư mục &amp; database</b>…")],
         )
+    if what == "permone":
+        return await _progress_op(
+            update, True, f"{E['perm']} <b>Đang phân quyền</b> {texts.esc(param)}…",
+            asyncio.to_thread(hostvn.perm_apply_one, param),
+            lambda r: (title(E["confirm"], "Phân quyền", texts.esc(r[1])),
+                       menus.back_only("m|perm")), est=45.0,
+            stages=[(50, "🔧 <b>Đang chmod thư mục &amp; file</b>…"),
+                    (80, "👤 <b>Đang chown về user website</b>…")])
+    if what == "permall":
+        return await _progress_op(
+            update, True, f"{E['perm']} <b>Đang phân quyền toàn bộ website</b>…",
+            asyncio.to_thread(hostvn.perm_apply_all),
+            lambda r: (title(E["confirm"], "Phân quyền toàn bộ",
+                             f"<code>{progress.bar(100)}</code>\n{texts.esc(r[1])}"),
+                       menus.back_only("m|perm")), est=120.0,
+            stages=[(40, "🔧 <b>Đang xử lý từng website</b>…"),
+                    (80, "👤 <b>Đang chown</b>…")])
     if what == "f2bjails":
         return await _progress_op(
             update, True, f"{E['fw']} <b>Đang bật thêm jail</b>…",
