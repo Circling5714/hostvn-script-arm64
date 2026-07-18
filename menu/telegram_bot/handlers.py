@@ -33,7 +33,8 @@ WRITE_ACTIONS = {"dom_add", "db_add", "cache_clear", "opcache_clear", "php_resta
                  "ssl_create", "ssl_wildcard", "ssl_remove", "ssl_alias",
                  "ssl_renew", "ssl_cfapi",
                  "cache_clear_all", "cache_mc", "cache_redis",
-                 "cache_opcache", "cache_fastcgi"}
+                 "cache_opcache", "cache_fastcgi",
+                 "fw_ban", "fw_unban", "fw_jails"}
 
 
 # --------------------------------------------------------------------------- #
@@ -380,6 +381,19 @@ async def cb_action(update, context, action, params):
         return await start_flow(update, context, "db_add", "m|db",
                                 E["db"], "Tạo database",
                                 "Nhập <b>tên database</b> (chỉ chữ/số/gạch dưới):")
+    if action in ("fw_ban", "fw_unban"):
+        ban = action == "fw_ban"
+        return await start_flow(
+            update, context, "fw_ban" if ban else "fw_unban", "m|fw",
+            "⛔" if ban else "🔓", "Ban IP" if ban else "Unban IP",
+            f"Nhập <b>địa chỉ IP</b> muốn {'chặn' if ban else 'gỡ chặn'} (vd: 1.2.3.4):")
+    if action == "fw_jails":
+        return await q.edit_message_text(
+            title(E["warn"], "Bật thêm jail",
+                  "Bật các jail bổ sung (recidive / nginx-botsearch / nginx-limit-req) "
+                  "và restart Fail2ban. Tiếp tục?"),
+            parse_mode=HTML, reply_markup=menus.confirm_menu("f2bjails", back="m|fw"))
+
     # ----- Cache: cac buoc rieng -----
     if action in ("cache_mc", "cache_redis"):
         name = "memcached" if action == "cache_mc" else "redis"
@@ -558,6 +572,46 @@ def _run_action(action: str, chat: int):
     if action == "bk_auto":
         return (title("⏰", "Auto backup", pre(hostvn.autobackup_info()) +
                       "\n<i>Đặt lịch chi tiết ở menu Cronjob trong shell.</i>"), "m|backup")
+    if action == "fw_status":
+        b = hostvn.fw_backend()
+        yn = lambda v: "có" if v else "KHÔNG"
+        body = (f"iptables : {yn(b['iptables'])}\n"
+                f"ufw      : {yn(b['ufw'])}\n"
+                f"nftables : {yn(b['nft'])}\n"
+                f"fail2ban banaction: {b['banaction']}\n"
+                f"Cloudflare WAF    : {'đã cấu hình' if b['cf_waf'] else 'chưa'}\n"
+                f"Cloudflare Tunnel : {'bật' if b['tunnel'] else 'tắt'}")
+        note = ""
+        if not b["iptables"] and not b["ufw"]:
+            note = ("\n\n⚠️ <b>Máy này không có iptables/ufw</b> (container Android). "
+                    "Fail2ban đang chạy action <code>hostvn-noop</code> nên chỉ "
+                    "<b>phát hiện</b> chứ không chặn được ở tầng máy.")
+            if b["tunnel"]:
+                note += ("\n\nLưu lượng vào qua <b>Cloudflare Tunnel</b>, nên việc chặn thật "
+                         "phải làm ở <b>Cloudflare WAF</b> — dùng mục ☁️ bên dưới.")
+        return title(E["fw"], "Trạng thái firewall", pre(body) + note), "m|fw"
+    if action == "fw_banned":
+        return title("🚫", "IP đang bị ban", pre(hostvn.f2b_banned())), "m|fw"
+    if action == "fw_cfwaf":
+        b = hostvn.fw_backend()
+        extra = ("\n<i>Đây là lớp chặn <b>thật</b> duy nhất trên máy này, vì không có "
+                 "iptables/ufw.</i>" if not b["iptables"] and not b["ufw"] else "")
+        return (title("☁️", "Cloudflare WAF", pre(hostvn.cf_waf_status()) + extra +
+                      "\n\nBật/tắt đồng bộ hoặc đổi token: <code>hostvn</code> → "
+                      "<b>5. Quan ly Firewall</b> → <b>10</b>."), "m|fw")
+    if action == "fw_port":
+        b = hostvn.fw_backend()
+        if not b["iptables"] and not b["ufw"]:
+            return (title("🔌", "Mở port / Bật-Tắt firewall",
+                          "Máy này <b>không có iptables/ufw</b> nên các thao tác mở port, "
+                          "bật/tắt firewall <b>không áp dụng được</b>.\n\n"
+                          "Cổng được kiểm soát ở hai nơi:\n"
+                          "• <b>Cloudflare</b> (lưu lượng vào qua Tunnel)\n"
+                          "• <b>Android</b> — máy không mở cổng ra Internet trực tiếp\n\n"
+                          "Xem cổng đang lắng nghe ở 🖥️ Hệ thống."), "m|fw")
+        return (title("🔌", "Mở port / Bật-Tắt firewall",
+                      "Chạy qua SSH: <code>hostvn</code> → <b>5. Quan ly Firewall</b> "
+                      "→ mục 1, 5, 6, 7."), "m|fw")
     if action == "ngx_test":
         return title(E["svc"], "Test cấu hình Nginx",
                      pre(hostvn.sh("nginx -t 2>&1", 30))), "m|nginx"
@@ -1204,6 +1258,12 @@ async def cb_yes(update, context, what, params):
             stages=[(40, f"{E['del']} <b>Xoá vHost &amp; PHP pool</b>…"),
                     (70, f"{E['del']} <b>Xoá user, thư mục &amp; database</b>…")],
         )
+    if what == "f2bjails":
+        return await _progress_op(
+            update, True, f"{E['fw']} <b>Đang bật thêm jail</b>…",
+            asyncio.to_thread(hostvn.f2b_extra_jails),
+            lambda msg: (title(E["confirm"], "Fail2ban jail", texts.esc(msg)),
+                         menus.back_only("m|fw")), est=25.0)
     if what == "logclr":
         return await _progress_op(
             update, True, f"{E['log']} <b>Đang xoá error log</b>…",
@@ -1354,6 +1414,28 @@ async def handle_flow(update, context, flow, text):
                 parse_mode=HTML, reply_markup=menus.build_keyboard(_features(chat)))
         else:
             await editor(f"{E['warn']} {err} Nhập lại hoặc bấm ❌ Hủy.")
+        return
+
+    if flow in ("fw_ban", "fw_unban"):
+        ban = flow == "fw_ban"
+        editor = await _make_editor(update, False)
+        ok, msg = await progress.run(
+            editor, f"{'⛔' if ban else '🔓'} <b>Đang xử lý {texts.esc(text)}</b>…",
+            asyncio.to_thread(hostvn.f2b_ban if ban else hostvn.f2b_unban, text.strip()),
+            est=10.0)
+        extra = ""
+        if ban:
+            b = await asyncio.to_thread(hostvn.fw_backend)
+            if not b["iptables"] and not b["ufw"]:
+                extra = ("\n\n⚠️ Fail2ban ở máy này dùng action <code>hostvn-noop</code> nên "
+                         "lệnh ban <b>chỉ ghi nhận</b>, không chặn thật. Muốn chặn thật hãy "
+                         "chặn IP ở <b>Cloudflare WAF</b>.")
+        await editor(title(E["confirm"] if ok else E["warn"],
+                           "Ban IP" if ban else "Unban IP", texts.esc(msg) + extra))
+        context.user_data.pop("flow", None)
+        await update.message.reply_text(
+            title(E["home"], "Menu chính", "Chọn chức năng từ <b>menu bên dưới</b>."),
+            parse_mode=HTML, reply_markup=menus.build_keyboard(_features(chat)))
         return
 
     if flow == "ssl_cfapi":
