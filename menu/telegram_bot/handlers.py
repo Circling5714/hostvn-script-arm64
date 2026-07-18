@@ -27,7 +27,9 @@ title = texts.title
 pre = texts.pre
 
 WRITE_ACTIONS = {"dom_add", "db_add", "cache_clear", "opcache_clear", "php_restart",
-                 "bk_run", "bk_restore", "bk_del"}
+                 "bk_run", "bk_restore", "bk_del",
+                 "dom_rename", "dom_rewrite", "dom_php", "dom_alias", "dom_redirect",
+                 "dom_sftp", "dom_protect", "dom_http3", "dom_clone", "dom_dbinfo"}
 
 
 # --------------------------------------------------------------------------- #
@@ -378,6 +380,23 @@ async def cb_action(update, context, action, params):
                      (E["backup"], "Backup website", "Chọn website cần backup:")),
         "bk_restore": (hostvn.list_domains, "rsdom", E["domain"], "m|backup",
                        ("♻️", "Khôi phục dữ liệu", "Chọn website cần khôi phục:")),
+        # --- Quan ly domain nang cao ---
+        "dom_rename":   (hostvn.list_domains, "dmrename", E["domain"], "m|domain",
+                         ("✏️", "Đổi tên miền", "Chọn domain cần đổi:")),
+        "dom_rewrite":  (hostvn.list_domains, "dmrw", E["domain"], "m|domain",
+                         ("🧱", "Rewrite vHost", "Chọn domain cần tạo lại vHost:")),
+        "dom_php":      (hostvn.list_domains, "dmphp", E["domain"], "m|domain",
+                         (E["php"], "Đổi phiên bản PHP", "Chọn domain:")),
+        "dom_alias":    (hostvn.list_domains, "dmalias", E["domain"], "m|domain",
+                         ("🔗", "Alias/Parked domain", "Chọn domain chính:")),
+        "dom_redirect": (hostvn.list_domains, "dmredir", E["domain"], "m|domain",
+                         ("↪️", "Redirect domain", "Chọn domain đích:")),
+        "dom_sftp":     (hostvn.list_domains, "dmsftp", E["domain"], "m|domain",
+                         (E["key"], "Đổi mật khẩu SFTP", "Chọn domain:")),
+        "dom_protect":  (hostvn.list_domains, "dmprot", E["domain"], "m|domain",
+                         ("🔐", "Bảo vệ thư mục", "Chọn domain:")),
+        "dom_http3":    (hostvn.list_domains, "dmhttp3", E["domain"], "m|domain",
+                         ("🚀", "HTTP/3 (QUIC)", "Chọn domain:")),
     }
     if action in PICKERS:
         loader, pick_act, emo, back, (t_emo, t_head, t_hint) = PICKERS[action]
@@ -441,6 +460,18 @@ def _run_action(action: str, chat: int):
     if action == "bk_auto":
         return (title("⏰", "Auto backup", pre(hostvn.autobackup_info()) +
                       "\n<i>Đặt lịch chi tiết ở menu Cronjob trong shell.</i>"), "m|backup")
+    if action == "dom_clone":
+        return (title("🧬", "Clone website",
+                      "Clone gồm nhiều bước hỏi ghi đè dữ liệu nguồn/đích nên "
+                      "<b>chưa đưa lên bot</b> để tránh mất dữ liệu.\n\n"
+                      "Chạy qua SSH: <code>hostvn</code> → <b>1. Quan ly ten mien</b> → "
+                      "<b>9. Clone website</b>."), "m|domain")
+    if action == "dom_dbinfo":
+        return (title(E["db"], "Đổi thông tin Database",
+                      "Đổi tên DB/user/mật khẩu sẽ làm site lỗi nếu file cấu hình "
+                      "(wp-config.php…) không được sửa khớp, nên <b>chưa đưa lên bot</b>.\n\n"
+                      "Chạy qua SSH: <code>hostvn</code> → <b>1. Quan ly ten mien</b> → "
+                      "<b>10. Doi thong tin Database</b>."), "m|domain")
     if action == "bk_connect":
         return (title("🔗", "Kết nối kho lưu trữ",
                       "Google Drive và OneDrive cần đăng nhập OAuth qua trình duyệt, "
@@ -480,6 +511,54 @@ async def cb_pick(update, context, action, params):
             asyncio.to_thread(_wp_cache_flush, target),
             lambda _: (title(E["wp"], target, "Đã xoá cache WordPress (nếu có)."),
                        menus.back_only("m|wp")), est=6.0)
+    # ----- Quan ly domain nang cao: sau khi chon domain -----
+    if action in ("dmrename", "dmrw", "dmphp", "dmalias", "dmredir",
+                  "dmsftp", "dmprot", "dmhttp3"):
+        if not can_write(chat):
+            return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                             reply_markup=menus.back_only("m|domain"))
+        context.user_data["dom"] = target
+        if action == "dmhttp3":
+            return await q.edit_message_text(
+                title("🚀", f"HTTP/3 — {target}", "Bật hay tắt HTTP/3 (QUIC)?"),
+                parse_mode=HTML, reply_markup=menus.onoff_menu(target, "h3"))
+        if action == "dmrw":
+            return await q.edit_message_text(
+                title("🧱", f"Rewrite vHost — {target}",
+                      "Chọn loại mã nguồn để tạo lại file cấu hình:"),
+                parse_mode=HTML, reply_markup=menus.source_menu(target))
+        if action == "dmphp":
+            vers = await asyncio.to_thread(hostvn.php_versions)
+            if len(vers) < 2:
+                return await q.edit_message_text(
+                    title(E["php"], "Đổi phiên bản PHP",
+                          f"Máy chỉ cài <b>một</b> phiên bản PHP ({', '.join(vers) or '?'}).\n"
+                          "Cài thêm PHP thứ hai qua SSH rồi mới đổi được."),
+                    parse_mode=HTML, reply_markup=menus.back_only("m|domain"))
+            return await q.edit_message_text(
+                title(E["php"], f"Đổi PHP — {target}", "Chọn phiên bản:"),
+                parse_mode=HTML, reply_markup=menus.php_choice_menu(target, vers))
+        if action == "dmsftp":
+            return await q.edit_message_text(
+                title(E["key"], "Đổi mật khẩu SFTP",
+                      f"Tạo mật khẩu SFTP mới ngẫu nhiên cho <b>{texts.esc(target)}</b>?"),
+                parse_mode=HTML,
+                reply_markup=menus.confirm_menu("sftp", target, back="m|domain"))
+        # Cac thao tac can nhap lieu
+        prompts = {
+            "dmrename": ("✏️", "Đổi tên miền", "Nhập <b>tên miền mới</b> (vd: moi.com):"),
+            "dmalias":  ("🔗", "Alias/Parked", "Nhập <b>domain alias</b> (vd: alias.com):"),
+            "dmredir":  ("↪️", "Redirect", f"Nhập <b>domain nguồn</b> sẽ chuyển hướng về {texts.esc(target)}:"),
+            "dmprot":   ("🔐", "Bảo vệ thư mục",
+                         "Nhập <b>đường_dẫn user mật_khẩu</b> cách nhau bởi dấu cách.\n"
+                         "Ví dụ: <code>/upload admin MatKhau123</code>"),
+        }
+        emo, head, prompt = prompts[action]
+        flow = {"dmrename": "dom_rename", "dmalias": "dom_alias",
+                "dmredir": "dom_redirect", "dmprot": "dom_protect"}[action]
+        return await start_flow(update, context, flow, "m|domain", emo,
+                                f"{head} — {target}", prompt)
+
     if action == "bkdom":     # chon website -> chon loai backup
         if not can_write(chat):
             return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
@@ -583,6 +662,48 @@ async def cb_nd(update, context, typ, params):
     await _progress_op(update, True, base,
                        asyncio.to_thread(hostvn.create_domain, typ, domain),
                        render, est=est, stages=stages)
+
+
+# ---- Quan ly domain nang cao (mien "dm") ------------------------------------ #
+async def cb_dm(update, context, action, params):
+    q = update.callback_query
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_DOMAIN):
+        return await q.edit_message_text(texts.DENY, parse_mode=HTML)
+    if not can_write(chat):
+        return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                         reply_markup=menus.back_only("m|domain"))
+    domain = params[0] if params else ""
+
+    if action in ("h3on", "h3off"):
+        on = action == "h3on"
+        return await _progress_op(
+            update, True,
+            f"🚀 <b>Đang {'bật' if on else 'tắt'} HTTP/3</b> cho {texts.esc(domain)}…",
+            asyncio.to_thread(hostvn.dom_http3, domain, on),
+            lambda r: ((title(E["confirm"], "HTTP/3", texts.esc(r[1])) if r[0]
+                        else title(E["warn"], "Không đổi được HTTP/3", texts.esc(r[1]))),
+                       menus.back_only("m|domain")),
+            est=20.0)
+
+    if action == "rw":       # dm|rw|<domain>|<source_idx>
+        src = int(params[1]) if len(params) > 1 and params[1].isdigit() else 20
+        return await _progress_op(
+            update, True, f"🧱 <b>Đang tạo lại vHost</b> cho {texts.esc(domain)}…",
+            asyncio.to_thread(hostvn.dom_rewrite_config, domain, src),
+            lambda r: ((title(E["confirm"], "Rewrite vHost", texts.esc(r[1])) if r[0]
+                        else title(E["warn"], "Rewrite thất bại", texts.esc(r[1]))),
+                       menus.back_only("m|domain")),
+            est=25.0)
+
+    if action == "php":      # dm|php|<domain>|<1|2>
+        choice = int(params[1]) if len(params) > 1 and params[1].isdigit() else 1
+        return await _progress_op(
+            update, True, f"{E['php']} <b>Đang đổi phiên bản PHP</b> cho {texts.esc(domain)}…",
+            asyncio.to_thread(hostvn.dom_change_php, domain, choice),
+            lambda r: (title(E["confirm"] if r[0] else E["warn"], "Đổi phiên bản PHP",
+                             texts.esc(r[1])), menus.back_only("m|domain")),
+            est=30.0)
 
 
 # ---- Backup / Restore (mien "bk") ------------------------------------------ #
@@ -712,6 +833,16 @@ async def cb_yes(update, context, what, params):
             stages=[(40, f"{E['del']} <b>Xoá vHost &amp; PHP pool</b>…"),
                     (70, f"{E['del']} <b>Xoá user, thư mục &amp; database</b>…")],
         )
+    if what == "sftp":      # yes|sftp|<domain> -> doi mat khau SFTP ngau nhien
+        return await _progress_op(
+            update, True, f"{E['key']} <b>Đang đổi mật khẩu SFTP</b> {texts.esc(param)}…",
+            asyncio.to_thread(hostvn.dom_change_sftp_pass, param, ""),
+            lambda r: ((title(E["confirm"], "Đã đổi mật khẩu SFTP",
+                              pre(f"Domain : {param}\nUser   : xem menu Thông tin domain\n"
+                                  f"Pass   : {r[2]}") + "\n⚠️ <b>Lưu lại!</b>") if r[0]
+                        else title(E["warn"], "Không đổi được", texts.esc(r[1]))),
+                       menus.back_only("m|domain")),
+            est=20.0)
     if what == "rst":       # yes|rst|<type>|<domain>|<date>
         rtype = params[0] if params else "full"
         domain = params[1] if len(params) > 1 else ""
@@ -794,6 +925,47 @@ async def handle_flow(update, context, flow, text):
             await editor(f"{E['warn']} {err} Nhập lại hoặc bấm ❌ Hủy.")
         return
 
+    # ----- Cac flow quan ly domain nang cao -----
+    if flow in ("dom_rename", "dom_alias", "dom_redirect", "dom_protect"):
+        dom = context.user_data.get("dom", "")
+        if not dom:
+            context.user_data.pop("flow", None)
+            return await update.message.reply_text(f"{E['warn']} Mất ngữ cảnh domain, chọn lại.",
+                                                   parse_mode=HTML)
+        editor = await _make_editor(update, False)
+
+        if flow == "dom_protect":
+            bits = text.split()
+            if len(bits) < 3:
+                return await update.message.reply_text(
+                    f"{E['warn']} Cần đủ 3 phần: <code>/đường_dẫn user mật_khẩu</code>. Nhập lại:",
+                    parse_mode=HTML)
+            path, usr, pwd = bits[0], bits[1], " ".join(bits[2:])
+            work = asyncio.to_thread(hostvn.dom_protect_dir, dom, path, usr, pwd)
+            titlemsg = f"🔐 <b>Đang bảo vệ thư mục</b> {texts.esc(path)}…"
+        elif flow == "dom_rename":
+            work = asyncio.to_thread(hostvn.dom_rename, dom, text)
+            titlemsg = f"✏️ <b>Đang đổi tên miền</b> {texts.esc(dom)}…"
+        elif flow == "dom_alias":
+            work = asyncio.to_thread(hostvn.dom_alias_add, dom, text)
+            titlemsg = f"🔗 <b>Đang thêm alias</b> {texts.esc(text)}…"
+        else:
+            work = asyncio.to_thread(hostvn.dom_redirect_add, dom, text)
+            titlemsg = f"↪️ <b>Đang thêm redirect</b> {texts.esc(text)}…"
+
+        ok, msg = await progress.run(editor, titlemsg, work, est=25.0,
+                                     stages=[(60, "🔄 <b>Đang cập nhật cấu hình nginx</b>…")])
+        await editor(title(E["confirm"] if ok else E["warn"],
+                           "Hoàn tất" if ok else "Không thành công",
+                           f"<code>{progress.bar(100)}</code>\n{texts.esc(msg)}" if ok
+                           else texts.esc(msg)))
+        context.user_data.pop("flow", None)
+        context.user_data.pop("dom", None)
+        await update.message.reply_text(
+            title(E["home"], "Menu chính", "Chọn chức năng từ <b>menu bên dưới</b>."),
+            parse_mode=HTML, reply_markup=menus.build_keyboard(_features(chat)))
+        return
+
     if flow == "dom_add":
         d = text.strip().lower()
         if d.startswith("www."):
@@ -820,4 +992,5 @@ async def handle_flow(update, context, flow, text):
 CALLBACK_ROUTES = {
     "nav": cb_nav, "m": cb_open, "a": cb_action, "svc": cb_svc, "do": cb_do,
     "pick": cb_pick, "nd": cb_nd, "cf": cb_cf, "yes": cb_yes, "bk": cb_bk,
+    "dm": cb_dm,
 }
