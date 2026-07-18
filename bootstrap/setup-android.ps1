@@ -57,8 +57,11 @@ param(
     [string]$RepoUrl   = 'https://github.com/Circling5714/hostvn-script-arm64.git',
     [string]$RepoLocal = '',
 
-    # SSH key (private) de cai vao container cho user root. Tao moi neu chua co.
+    # SSH key (private) - dung cho buoc cai tu dong (van cai vao root, song song mat khau)
     [string]$SshKey = "$PSScriptRoot\..\.ssh\id_ed25519",
+
+    # Mat khau root MAC DINH de SSH bang tai khoan root (doi cho moi truong that!)
+    [string]$RootPassword = 'hostvnscriptarm64_qmv2026',
 
     # Chi lam toi buoc nao (all|adb|apk|deploy|ssh|install)
     [ValidateSet('all','adb','apk','deploy','ssh','install')]
@@ -233,30 +236,43 @@ USER_PASSWORD="hostvn2026"
 # PHASE 4: start container + cau hinh SSH (root key + port)
 # ============================================================================
 function Phase-Ssh {
-    Info "Phase 4: start container + cau hinh SSH"
+    Info "Phase 4: start container + cau hinh SSH (root + mat khau mac dinh)"
     AdbSu "sh $CLI -p $Profile mount; sh $CLI -p $Profile start" | Out-Null
     Start-Sleep 3
+    $mnt = '/data/local/mnt'
 
-    # Tao SSH key neu chua co
+    # Tao SSH key neu chua co (dung cho buoc cai tu dong; song song voi mat khau)
     if (-not (Test-Path $SshKey)) {
         Info "Tao SSH key: $SshKey"
         New-Item -ItemType Directory -Force -Path (Split-Path $SshKey) | Out-Null
         & ssh-keygen -t ed25519 -N '""' -f $SshKey | Out-Null
     }
     $pub = Get-Content "$SshKey.pub" -Raw
-    # Cai public key cho root trong container (qua chroot mount tai /data/local/mnt)
-    $mnt = '/data/local/mnt'
     AdbSu "mkdir -p $mnt/root/.ssh; echo '$($pub.Trim())' > $mnt/root/.ssh/authorized_keys; chmod 700 $mnt/root/.ssh; chmod 600 $mnt/root/.ssh/authorized_keys"
-    # Bat PermitRootLogin + Port trong sshd_config
-    AdbSu "sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' $mnt/etc/ssh/sshd_config; grep -q '^Port $SshPort' $mnt/etc/ssh/sshd_config || echo 'Port $SshPort' >> $mnt/etc/ssh/sshd_config"
-    # Khoi dong lai ssh trong container
-    AdbSu "sh $CLI -p $Profile shell 'export PATH=/usr/sbin:/usr/bin:/sbin:/bin; mkdir -p /run/sshd; pkill sshd 2>/dev/null; /usr/sbin/sshd -p $SshPort'" | Out-Null
+
+    # Cho phep root dang nhap bang MAT KHAU (mac dinh) + van giu key
+    AdbSu "sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' $mnt/etc/ssh/sshd_config"
+    AdbSu "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' $mnt/etc/ssh/sshd_config"
+    AdbSu "grep -q '^PasswordAuthentication yes' $mnt/etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> $mnt/etc/ssh/sshd_config"
+    AdbSu "grep -q '^Port $SshPort' $mnt/etc/ssh/sshd_config || echo 'Port $SshPort' >> $mnt/etc/ssh/sshd_config"
+
+    # Dat mat khau root + khoi dong lai sshd: ghi script vao container (base64 -> tranh quoting),
+    # chay qua chroot. chpasswd + sshd doc cau hinh moi.
+    $sh = "#!/bin/bash`nexport PATH=/usr/sbin:/usr/bin:/sbin:/bin`necho 'root:$RootPassword' | chpasswd`nmkdir -p /run/sshd`npkill -x sshd 2>/dev/null`nsleep 1`n/usr/sbin/sshd -p $SshPort`n"
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($sh -replace "`r`n","`n")))
+    AdbSu "echo $b64 | base64 -d > $mnt/root/.hvn-sshsetup.sh; chmod +x $mnt/root/.hvn-sshsetup.sh"
+    AdbSu "sh $CLI -p $Profile shell /bin/bash /root/.hvn-sshsetup.sh" | Out-Null
+    Start-Sleep 2
 
     # Xac dinh IP dien thoai de ssh
     $ip = ($DeviceAddr -split ':')[0]
     if (-not $ip) { $ip = (AdbSu "ip route get 1 2>/dev/null | awk '{print \$7; exit}'") -join '' }
     $global:PhoneIp = $ip.Trim()
-    Ok "SSH san sang: ssh -i $SshKey -p $SshPort root@$($global:PhoneIp)"
+
+    Ok "SSH san sang:"
+    Ok "  >> Bang MAT KHAU (mac dinh): ssh -p $SshPort root@$($global:PhoneIp)   [mat khau: $RootPassword]"
+    Ok "  >> Bang key:                 ssh -i $SshKey -p $SshPort root@$($global:PhoneIp)"
+    Warn "Doi mat khau root ($RootPassword) neu dung cho moi truong that: passwd root"
 }
 
 # ============================================================================
