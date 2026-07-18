@@ -12,6 +12,7 @@ import shlex
 import string
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import config as C
@@ -350,3 +351,189 @@ def restart_stack() -> str:
 
 def reboot() -> None:
     subprocess.Popen(["bash", "-c", "sleep 2; reboot"], env=_env())
+
+
+# --------------------------------------------------------------------------- #
+# Backup / Restore  (giu DUNG format cua shell hostvn de restore cheo duoc:
+#   /home/backup/<YYYY-MM-DD>/<domain>/<domain>.tar.gz  +  <db_name>.sql.gz )
+# --------------------------------------------------------------------------- #
+BACKUP_ROOT = "/home/backup"
+
+
+def conf_val(key: str, path: str = C.FILE_INFO) -> str:
+    p = Path(path)
+    if not p.exists():
+        return ""
+    m = re.search(rf"^{re.escape(key)}=(.*)$", p.read_text(errors="replace"), re.M)
+    return m.group(1).strip().strip("\"'") if m else ""
+
+
+def backup_site(domain: str, btype: str = "full") -> tuple[bool, str, str]:
+    """btype: full | source | db. Tra (ok, thong_bao, thu_muc_dich)."""
+    uc = read_user_conf(domain)
+    user, db = uc.get("username", ""), uc.get("db_name", "")
+    if not user:
+        return False, "Không tìm thấy user của domain.", ""
+    date = time.strftime("%Y-%m-%d")
+    dest = f"{BACKUP_ROOT}/{date}/{domain}"
+    home = f"/home/{user}/{domain}"
+    qd, qdest, qhome = shlex.quote(domain), shlex.quote(dest), shlex.quote(home)
+    sh(f"mkdir -p {qdest}", 20)
+    done: list[str] = []
+
+    if btype in ("full", "source"):
+        # Giong shell: tam copy wp-config vao public_html de nam trong tar, xong xoa ban copy
+        script = f"""
+cd {qhome} || exit 1
+rm -f {qdest}/{qd}.tar.gz
+MOVED=""
+if [ -f wp-config.php ] && [ ! -f public_html/wp-config.php ]; then
+    cp wp-config.php public_html/wp-config.php; MOVED=1
+fi
+if [ -d public_html/storage ]; then
+    tar -cpzf {qdest}/{qd}.tar.gz \
+        --exclude "public_html/storage/framework/cache" \
+        --exclude "public_html/storage/framework/view" public_html
+else
+    tar -cpzf {qdest}/{qd}.tar.gz --exclude "public_html/wp-content/cache" public_html
+fi
+if [ -n "$MOVED" ] && [ -f public_html/wp-config.php ]; then rm -f public_html/wp-config.php; fi
+"""
+        sh(script, 900, merge=True)
+        if Path(f"{dest}/{domain}.tar.gz").exists():
+            done.append("mã nguồn")
+        else:
+            return False, "Nén mã nguồn thất bại.", dest
+
+    if btype in ("full", "db"):
+        if not db:
+            if btype == "db":
+                return False, "Domain này không có database.", dest
+        else:
+            pw = conf_val("mysql_pwd")
+            sh(f"rm -f {qdest}/{shlex.quote(db)}.sql.gz; "
+               f"mysqldump -uadmin -p{shlex.quote(pw)} {shlex.quote(db)} | gzip > {qdest}/{shlex.quote(db)}.sql.gz",
+               900, merge=True)
+            dump = Path(f"{dest}/{db}.sql.gz")
+            if dump.exists() and dump.stat().st_size > 20:
+                done.append("database")
+            else:
+                return False, "Dump database thất bại.", dest
+
+    size = sh(f"du -sh {qdest} 2>/dev/null | cut -f1", 20)
+    return True, f"Đã backup {', '.join(done)} ({size}).", dest
+
+
+def backup_dates(domain: str = "") -> list[str]:
+    """Danh sach ngay co backup (cho 1 domain neu truyen vao)."""
+    root = Path(BACKUP_ROOT)
+    if not root.is_dir():
+        return []
+    out = []
+    for d in sorted((p.name for p in root.iterdir() if p.is_dir()), reverse=True):
+        if not domain or (root / d / domain).is_dir():
+            out.append(d)
+    return out
+
+
+def list_backups() -> list[dict]:
+    root = Path(BACKUP_ROOT)
+    if not root.is_dir():
+        return []
+    rows: list[dict] = []
+    for date_dir in sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True):
+        for dom_dir in sorted(p for p in date_dir.iterdir() if p.is_dir()):
+            files = [f.name for f in dom_dir.iterdir() if f.is_file()]
+            size = sh(f"du -sh {shlex.quote(str(dom_dir))} 2>/dev/null | cut -f1", 15)
+            rows.append({"date": date_dir.name, "domain": dom_dir.name,
+                         "size": size or "?", "files": files})
+    return rows
+
+
+def delete_backup(domain: str, date: str) -> bool:
+    # An toan: bat buoc ca 2 tham so, khong cho ky tu duong dan
+    if not domain or not date or "/" in domain or "/" in date or ".." in f"{domain}{date}":
+        return False
+    target = Path(BACKUP_ROOT) / date / domain
+    if not target.is_dir():
+        return False
+    sh(f"rm -rf {shlex.quote(str(target))}", 60)
+    # don thu muc ngay neu rong
+    sh(f"rmdir {shlex.quote(str(Path(BACKUP_ROOT) / date))} 2>/dev/null", 10)
+    return not target.exists()
+
+
+def restore_site(domain: str, date: str, rtype: str = "full") -> tuple[bool, str]:
+    """rtype: full | source | db. Khoi phuc tu /home/backup/<date>/<domain>."""
+    uc = read_user_conf(domain)
+    user, db = uc.get("username", ""), uc.get("db_name", "")
+    if not user:
+        return False, "Không tìm thấy user của domain."
+    src = Path(BACKUP_ROOT) / date / domain
+    if not src.is_dir():
+        return False, "Không có bản backup cho ngày này."
+    qsrc, qd = shlex.quote(str(src)), shlex.quote(domain)
+    done: list[str] = []
+
+    if rtype in ("full", "source"):
+        tarball = src / f"{domain}.tar.gz"
+        if not tarball.exists():
+            return False, "Bản backup này không có mã nguồn."
+        qu, qhome = shlex.quote(user), shlex.quote(f"/home/{user}/{domain}")
+        sh(f"""
+mkdir -p {qhome}/public_html
+rm -rf {qhome}/public_html/*
+tar xzf {qsrc}/{qd}.tar.gz -C {qhome}/
+chmod 711 /home; chmod 755 /home/{qu}; chmod 711 {qhome}
+[ -d {qhome}/logs ] && chmod 711 {qhome}/logs
+chmod 755 {qhome}/public_html
+find {qhome}/public_html/ -type d -print0 | xargs -0 -r chmod 0755
+find {qhome}/public_html/ -type f -print0 | xargs -0 -r chmod 0644
+chown root:root /home/{qu}
+chown -R {qu}:{qu} {qhome}
+[ -d /home/{qu}/tmp ] && chown -R {qu}:{qu} /home/{qu}/tmp
+[ -d /home/{qu}/php ] && chown -R {qu}:{qu} /home/{qu}/php
+""", 900, merge=True)
+        done.append("mã nguồn")
+
+    if rtype in ("full", "db"):
+        if not db:
+            if rtype == "db":
+                return False, "Domain này không có database."
+        else:
+            gz = src / f"{db}.sql.gz"
+            plain = src / f"{db}.sql"
+            pw = conf_val("mysql_pwd")
+            if gz.exists():
+                # zcat: khong lam hong file backup (shell goc gunzip tai cho)
+                out = sh(f"zcat {shlex.quote(str(gz))} | mysql -uadmin -p{shlex.quote(pw)} {shlex.quote(db)}",
+                         900, merge=True)
+            elif plain.exists():
+                out = sh(f"mysql -uadmin -p{shlex.quote(pw)} {shlex.quote(db)} < {shlex.quote(str(plain))}",
+                         900, merge=True)
+            else:
+                return False, "Bản backup này không có database."
+            if "ERROR" in out.upper():
+                return False, f"Lỗi import database: {out.splitlines()[0][:120]}"
+            done.append("database")
+
+    return True, f"Đã khôi phục {', '.join(done)} cho {domain}."
+
+
+def rclone_remotes() -> list[str]:
+    out = sh("rclone listremotes 2>/dev/null", 15)
+    return [x.strip().rstrip(":") for x in out.splitlines() if x.strip()]
+
+
+def rclone_delete_remote(name: str) -> bool:
+    if not name or "/" in name:
+        return False
+    sh(f"rclone config delete {shlex.quote(name)}", 20, merge=True)
+    return name not in rclone_remotes()
+
+
+def autobackup_info() -> str:
+    cron = sh("crontab -l 2>/dev/null | grep -iE 'backup|hostvn' ", 15)
+    files = sh("ls /etc/cron.d 2>/dev/null | tr '\\n' ' '", 10)
+    return (f"Cron backup:\n{cron or '(chưa đặt lịch)'}\n\n"
+            f"/etc/cron.d: {files or '(trống)'}")
