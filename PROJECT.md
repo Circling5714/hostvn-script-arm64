@@ -271,3 +271,118 @@ Chế độ tuỳ chọn: mọi website phục vụ qua Cloudflare Tunnel, **VPS
 - `wp package install` (wp-cli-rename-db-prefix…) có thể kêu ca trên PHP 8.4 — không chặn cài đặt.
 - `optipng 0.7.7` / `jpegoptim 1.5.2` giữ nguyên phiên bản (URL còn sống, build được GCC mới) — có thể nâng sau.
 - ngx_cache_purge nhánh 3.x (async purge) đã ra — hiện dùng 2.5.6 cho ổn định, cân nhắc nâng sau khi 3.x trưởng thành.
+
+## 15. Telegram bot — giao diện quản trị mở rộng (18/07/2026)
+
+Telegram control bot đã được mở rộng từ tập lệnh cơ bản thành giao diện nút bấm
+bám theo menu shell. Backend Python async dùng `python-telegram-bot>=20,<22`, có
+bản Bash dự phòng và chạy qua lớp `_svc` nên tương thích cả systemd lẫn
+Android/chroot.
+
+Các nhóm mới gồm WordPress đầy đủ, LEMP, phân quyền, thông tin tài khoản,
+cronjob/auto-backup, Admin Tool, cập nhật HostVN Scripts và đổi ngôn ngữ menu
+shell. Thao tác ghi được kiểm soát bởi `BOT_MODE` và whitelist Chat ID; thao tác
+nhạy cảm có xác nhận, còn các luồng nhập liệu phức tạp được chuyển hướng rõ ràng
+sang SSH.
+
+Backend Python chỉ đăng ký `/start`, `/menu`, `/cancel`; tên cấu hình `shell`
+được giữ để tương thích nhưng không mở `/sh`. Đây là thay đổi an toàn so với mô
+tả ở giai đoạn feature-add ban đầu.
+
+Tài liệu vận hành và bảo mật: [`menu/telegram_bot/README.md`](menu/telegram_bot/README.md).
+
+## 16. Sửa lỗi đặc thù ARM64/Android + hạ tầng phát hành (18/07/2026)
+
+Nhóm lỗi chỉ xuất hiện trên môi trường Android/chroot, mỗi lỗi đều được xác định
+nguyên nhân gốc rồi mới sửa (không vá triệu chứng).
+
+### 16.1. memcached không khởi động — Android "paranoid networking"
+
+Daemon và cấu hình đều đúng (chạy foreground khởi tạo bình thường), nhưng bind
+luôn báo `failed to listen on one of interface(s) 127.0.0.1: Operation not permitted`.
+
+Nguyên nhân: Android chỉ cho tiến trình thuộc **gid 3003 (`aid_inet`)** tạo socket
+mạng. memcached bind **sau khi** hạ quyền bằng `-u nobody`, mà `setgroups()` lúc
+hạ quyền **xoá sạch group phụ** → mất `aid_inet` đúng lúc cần. nginx/mariadb không
+dính vì chúng bind **từ lúc còn là root**. Đã kiểm chứng: thêm `nobody` vào
+`aid_inet`, chạy `-u hostvn`, hay `sg aid_inet -c` đều **không cứu được**.
+
+Cách sửa: trên Android/container chạy memcached bằng **unix socket**
+(`/tmp/memcached.sock`) thay vì TCP — `AF_UNIX` không bị hạn chế này. Bản cài
+thường vẫn nghe `127.0.0.1`. Đã test set/get qua socket trả đúng giá trị.
+
+### 16.2. fail2ban không khởi động sau khi máy reboot đột ngột
+
+`fail2ban-client -t` pass, start thủ công được, nhưng service luôn `inactive`.
+Trong chroot **không có systemd** và `/var/run` **không bị dọn khi boot**, nên
+`fail2ban.sock` + `.pid` của lần chạy trước còn sót; `fail2ban-client start`
+(lệnh mà rc.local gọi) từ chối khởi động vì tưởng đã có server.
+
+`_svc fail2ban start` giờ `ping` trước — đang chạy thật thì không đụng; ngược lại
+xoá socket/pid mồ côi rồi start với `-x`.
+
+### 16.3. Firewall: fail2ban chỉ phát hiện, không chặn
+
+Container không có `iptables`/`ip6tables`/`ufw`, `HOSTVN_FIREWALL=no`, fail2ban
+chạy `banaction = hostvn-noop`. Lưu lượng vào qua Cloudflare Tunnel nên **điểm
+chặn thật duy nhất là Cloudflare WAF**. Menu Firewall trên bot nói rõ điều này
+thay vì hiện nút giả; lệnh ban vẫn ghi nhận nhưng kèm cảnh báo không chặn thật.
+
+### 16.4. Cloudflare Tunnel: DNS không đồng bộ khi đổi tên miền
+
+Ở chế độ tunnel, hostname chỉ phân giải được khi có CNAME trỏ tới
+`<tunnel-id>.cfargotunnel.com`. `add_domain`/`delete_domain` đã tạo/xoá bản ghi,
+nhưng **`change_domain`, `alias_domain`, `redirect_domain` thì không** → đổi tên
+miền xong là site chết. Đã bổ sung hook cho cả 3 (thêm bản ghi mới **trước**, xoá
+bản ghi cũ **sau**, để không có khoảng trống), bọc trong `network_mode=tunnel`.
+Kiểm chứng bằng Cloudflare API thật.
+
+### 16.5. Sống sót khi IP LAN thay đổi
+
+Bản cài ghi cứng IP vào 2 nơi, DHCP đổi lease là hỏng:
+
+- `web_apps.conf` chặn `/nginx_status`, `/php_status` bằng `allow <1 IP>` → IP mới
+  bị **403**. Nay dùng dải riêng **RFC1918** (`10/8`, `172.16/12`, `192.168/16`)
+  + loopback.
+- `/var/hostvn/ipaddress` lưu `IPADDRESS=<ip>` (dùng cho host SFTP hiển thị và
+  **tên thư mục backup trên remote**). Nay **tự phát hiện lúc chạy**: `HOSTVN_IP`
+  (ép buộc) → IP nguồn của default route → `hostname -I` → loopback.
+
+Lưu ý: thư mục backup trên remote đặt tên theo IP, nên bản backup trước và sau khi
+đổi IP nằm ở hai thư mục khác nhau.
+
+### 16.6. PHP Redis extension — ưu tiên apt
+
+`install_php_redis.sh` luôn biên dịch igbinary + phpredis từ PECL. Trên điện thoại
+ARM việc này chậm và dễ OOM (đúng nguyên nhân từng gây reboot). PPA ondrej đã có
+sẵn gói **arm64 đúng phiên bản repo ghim** (igbinary 3.2.16, phpredis 6.3.0) nên
+script thử `apt` trước, chỉ compile khi apt thất bại.
+
+### 16.7. Phát hành: `menu.tar.gz` do CI sinh
+
+Trước đây `menu.tar.gz` là artifact commit tay — quên đóng gói một lần là người
+dùng bấm **14. Cập nhật** sẽ nhận menu cũ và **mất bản vá**. Nay:
+
+- `.github/workflows/static.yml` sinh tarball từ `menu/` khi build Pages (cờ tất
+  định `--format=gnu --sort=name`), **fail build** nếu thiếu `menu/`, thiếu file
+  mong đợi, hoặc `version` không có `script_version`.
+- `add_menu()` trong `hostvn`: cài local tự đóng gói từ `${LOCAL_DIR}/menu` nếu
+  không có tarball → `git clone && bash install` dùng đúng working tree và chạy
+  được không cần mạng.
+- `menu.tar.gz` đã bỏ khỏi git. **Nguồn duy nhất là thư mục `menu/`.**
+
+### 16.8. Thương hiệu & phiên bản
+
+`AUTHOR="HostVN"`, `AUTHOR_WEB="HostVN Scripts ARM64"`, banner cài đặt
+`HostVN Scripts`, phiên bản **1.1.1** (`SCRIPTS_VERSION`, `update`, `version`).
+Header menu hiện: `HostVN Scripts - VPS Manager Scripts` / `HostVN Scripts ARM64 - Version 1.1.1`.
+
+Hai điểm phải sửa kèm: lệnh gỡ cài đặt `sed -i '/HOSTVN.VN/d' ~/.bashrc` phải đổi
+theo `$AUTHOR` mới (nếu không sẽ không bao giờ dọn được dòng banner trong
+`.bashrc`); và `1.0.0.1` trong dòng `resolver` của nginx là **IP DNS Cloudflare**,
+không phải số phiên bản — không được đụng.
+
+Bộ ngôn ngữ `en` cũng đã rà lại: thiếu hẳn key `lang_permission_manager` (menu 6
+hiển thị trống), `lang_remote_name_notify` ghi sai "5 - 8 characters" trong khi
+`validate_user()` chỉ yêu cầu ≥ 5 và không có giới hạn trên, lỗi chính tả `CND`
+→ `CDN`, và `Chmod\Chown` → `Chmod/Chown`.
