@@ -56,9 +56,11 @@ _change_port() {
     sed -i "s|${current_port}|${new_port}|g" "${NGINX_CONF_DIR}"/web_apps.conf
     sed -i '/admin_port=/d' "${FILE_INFO}"
     echo "admin_port=${new_port}" >> "${FILE_INFO}"
-    ufw allow "${new_port}"/tcp
-    ufw delete allow "${current_port}"
-    _svc restart ufw
+    if [ "${HOSTVN_FIREWALL}" = "yes" ]; then
+        ufw allow "${new_port}"/tcp
+        ufw delete allow "${current_port}"
+        _svc restart ufw
+    fi
 
     rm -rf /etc/fail2ban/jail.local
     if [ -f "${CUSTOM_DIR}/fail2ban/jail.local" ]; then

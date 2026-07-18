@@ -68,11 +68,13 @@ _change_port(){
     sed -i '/ssh_port=/d' "${FILE_INFO}"
     echo "ssh_port=${port_new}" >> "${FILE_INFO}"
 
-    ufw allow "${port_new}"/tcp
-    ufw delete allow "${current_port}"
+    if [ "${HOSTVN_FIREWALL}" = "yes" ]; then
+        ufw allow "${port_new}"/tcp
+        ufw delete allow "${current_port}"
+    fi
 
     _svc restart sshd
-    _svc restart ufw
+    [ "${HOSTVN_FIREWALL}" = "yes" ] && _svc restart ufw
 
     rm -rf /etc/fail2ban/jail.local
     if [ -f "${CUSTOM_DIR}/fail2ban/jail.local" ]; then
