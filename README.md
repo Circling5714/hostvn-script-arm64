@@ -66,7 +66,7 @@ cd hostvn-script-arm64 && bash install
 
 Script tự phát hiện Android/không-systemd và áp dụng toàn bộ điều chỉnh ở trên. Sau khi cài xong, quản trị bằng lệnh `hostvn`.
 
-**Lưu ý cho dev:** sau khi sửa bất kỳ file nào trong `menu/`, phải đóng gói lại: `tar -czf menu.tar.gz menu` (LF line-ending).
+**Lưu ý cho dev:** `menu.tar.gz` **không nằm trong repo** — GitHub Actions tự sinh nó từ thư mục `menu/` mỗi lần build Pages, nên gói phân phối luôn khớp mã nguồn. Chỉ cần sửa trong `menu/` rồi push. Cài local (`git clone` + `bash install`) cũng tự đóng gói từ `menu/`, không cần mạng.
 
 ## 5. Nguồn phần mềm
 

@@ -1,3 +1,6 @@
 /.idea
 ._.DS_Store
 ..DS_Store
+
+# Sinh tu dong boi GitHub Actions khi build Pages (nguon duy nhat la thu muc menu/)
+menu.tar.gz

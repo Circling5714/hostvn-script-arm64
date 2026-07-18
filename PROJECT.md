@@ -170,7 +170,7 @@ wget https://circling5714.github.io/hostvn-script-arm64/install && bash install
 ## 9. Quy trình phát triển (cho lần sửa sau)
 
 1. Sửa code trên branch, **line-ending LF** (đã có `.gitattributes` ép sẵn).
-2. Nếu sửa bất kỳ file nào trong `menu/` → **bắt buộc** đóng gói lại: `rm -f menu.tar.gz && tar --format=gnu -czf menu.tar.gz menu`.
+2. Sửa file trong `menu/` → **chỉ cần push**. `menu.tar.gz` không còn được commit; GitHub Actions (`.github/workflows/static.yml`) sinh nó từ `menu/` khi build Pages, và `add_menu()` trong `hostvn` tự đóng gói từ `menu/` khi cài local. Nguồn duy nhất là thư mục `menu/`.
 3. Nâng phiên bản thành phần → sửa file `version` (menu Update Nginx / update script đọc từ đây).
 4. Kiểm tra syntax: `bash -n <file>` cho mọi script đã sửa.
 5. Push lên `main` → Pages tự deploy → VPS đã cài dùng menu `hostvn` → mục Update script để nhận bản mới.
