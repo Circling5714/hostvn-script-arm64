@@ -329,15 +329,31 @@ _svc_manual() {
             esac ;;
 
         hostvn-telegram-bot)
-            # Bot Telegram: che do manual chay truc tiep bot.sh (khong co systemd unit)
-            local _botsh=/var/hostvn/menu/telegram_bot/bot.sh
+            # Bot Telegram (che do manual, khong systemd). Uu tien ban Python (venv),
+            # fallback bot.sh (bash) neu chua dung venv.
+            local _botdir=/var/hostvn/menu/telegram_bot
+            local _py="${_botdir}/venv/bin/python"
+            local _botpy="${_botdir}/bot.py"
+            local _botsh="${_botdir}/bot.sh"
             case "${action}" in
                 start|restart)
-                    pkill -f "bash ${_botsh}" 2>/dev/null; sleep 1
-                    [ -f "${_botsh}" ] && setsid /bin/bash "${_botsh}" >/dev/null 2>&1 < /dev/null &
+                    pkill -f "telegram_bot/bot.py" 2>/dev/null
+                    pkill -f "telegram_bot/bot.sh" 2>/dev/null
+                    sleep 1
+                    if [ -x "${_py}" ] && [ -f "${_botpy}" ]; then
+                        ( cd "${_botdir}" && setsid "${_py}" "${_botpy}" >/root/tgbot.log 2>&1 < /dev/null & )
+                    elif [ -f "${_botsh}" ]; then
+                        setsid /bin/bash "${_botsh}" >/dev/null 2>&1 < /dev/null &
+                    fi
                     ;;
-                stop)    pkill -f "bash ${_botsh}" 2>/dev/null ;;
-                is-active) pgrep -f "bash ${_botsh}" >/dev/null && echo active || { echo inactive; return 3; } ;;
+                stop)
+                    pkill -f "telegram_bot/bot.py" 2>/dev/null
+                    pkill -f "telegram_bot/bot.sh" 2>/dev/null
+                    ;;
+                is-active)
+                    { pgrep -f "telegram_bot/bot.py" >/dev/null || pgrep -f "telegram_bot/bot.sh" >/dev/null; } \
+                        && echo active || { echo inactive; return 3; }
+                    ;;
             esac ;;
 
         supervisor|supervisord)

@@ -81,6 +81,28 @@ _detect_chat_id() {
     fi
 }
 
+_ensure_python_bot() {
+    # Bot chay bang Python (python-telegram-bot) trong venv rieng. Cai 1 lan.
+    local dir=/var/hostvn/menu/telegram_bot
+    if [ -x "${dir}/venv/bin/python" ] && "${dir}/venv/bin/python" -c 'import telegram' 2>/dev/null; then
+        return 0
+    fi
+    printf "%s\n" "${GREEN}Dang cai moi truong Python cho bot (python-telegram-bot), co the mat vai phut...${NC}"
+    command -v python3 >/dev/null 2>&1 || { apt-get update -y >/dev/null 2>&1; apt-get install -y python3 >/dev/null 2>&1; }
+    python3 -m venv "${dir}/venv" 2>/dev/null || {
+        apt-get update -y >/dev/null 2>&1
+        apt-get install -y python3-venv python3-pip >/dev/null 2>&1
+        python3 -m venv "${dir}/venv" 2>/dev/null
+    }
+    "${dir}/venv/bin/python" -m pip install --upgrade pip >/dev/null 2>&1
+    "${dir}/venv/bin/python" -m pip install 'python-telegram-bot>=20,<22' >/dev/null 2>&1
+    if "${dir}/venv/bin/python" -c 'import telegram' 2>/dev/null; then
+        printf "%s\n" "${GREEN}Da cai xong python-telegram-bot.${NC}"
+    else
+        printf "%s\n" "${RED}Chua cai duoc python-telegram-bot. Bot se tam chay ban bash (bot.sh).${NC}"
+    fi
+}
+
 _setup() {
     # Yeu cau curl + jq
     if ! command -v jq >/dev/null 2>&1; then
@@ -133,6 +155,9 @@ WantedBy=multi-user.target
 EOF
         _svc daemon-reload
     fi
+    # Cai moi truong Python cho bot (neu chua co) truoc khi chay
+    _ensure_python_bot
+
     _svc enable "${SERVICE_NAME}" >/dev/null 2>&1
     _svc restart "${SERVICE_NAME}"
     sleep 2
