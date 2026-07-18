@@ -26,16 +26,26 @@ FILE_INFO="/var/hostvn/.hostvn.conf"
 VHOST_DIR="/etc/nginx/conf.d"
 
 # ============================================================ Telegram API
+# curl toi Telegram, kiem tra '"ok":true'; thu lai 2 lan (WiFi dien thoai co the rot goi)
+_tg_call() { # endpoint  data-urlencode-args...
+    local ep="$1"; shift; local i out
+    for i in 1 2 3; do
+        out=$(curl -s --max-time 20 "${API}/${ep}" "$@" 2>/dev/null)
+        [[ "${out}" == *'"ok":true'* || "${out}" == *"not modified"* ]] && return 0
+        sleep 1
+    done
+    return 1
+}
 tg_send() {   # chat text [keyboard_json]
     local chat="$1" text="${2:0:3900}" kb="$3" args=(--data-urlencode "chat_id=${chat}" --data-urlencode "text=${text}" --data-urlencode "parse_mode=HTML")
     [ -n "${kb}" ] && args+=(--data-urlencode "reply_markup=${kb}")
-    curl -s --max-time 20 -o /dev/null "${API}/sendMessage" "${args[@]}" >/dev/null 2>&1
+    _tg_call sendMessage "${args[@]}"
 }
 tg_edit() {   # chat msg text kb
-    curl -s --max-time 20 -o /dev/null "${API}/editMessageText" \
+    _tg_call editMessageText \
         --data-urlencode "chat_id=$1" --data-urlencode "message_id=$2" \
         --data-urlencode "text=${3:0:3900}" --data-urlencode "parse_mode=HTML" \
-        --data-urlencode "reply_markup=$4" >/dev/null 2>&1
+        --data-urlencode "reply_markup=$4"
 }
 tg_answer() { curl -s --max-time 15 -o /dev/null "${API}/answerCallbackQuery" --data-urlencode "callback_query_id=$1" --data-urlencode "text=${2:-}" >/dev/null 2>&1; }
 btn() { jq -cn --arg t "$1" --arg d "$2" '{text:$t,callback_data:$d}'; }
@@ -266,7 +276,10 @@ Disk $(df -h /|awk 'NR==2{print $5}') | RAM $(free -h|awk '/Mem/{print $3"/"$2}'
             TEXT="🌐 <b>Domain</b>
 ${out:-（chua co）}"; KB=$(kb_rows "$(BACK m:domain)") ;;
         dom_info) pick_domain dominfo "ℹ️ Chon domain xem thong tin:" ;;
-        dom_add)  _can || { note_ssh "Them domain" "Domain > Them domain"; }; _can && start_flow "${chat}" dom_add "Nhap <b>ten mien</b> muon them (vd: test.com):" ;;
+        dom_add)  if _can; then start_flow "${chat}" dom_add "🌐 Nhap <b>ten mien</b> muon them (vd: shop.com):"
+                    TEXT="🌐 <b>Them domain</b>
+✍️ Nhap <b>ten mien</b> vao o chat ben duoi roi gui (vd: shop.com).
+Go /huy de huy."; KB=$(kb_rows "[$(btn '❌ Huy' m:domain)]"); else note_ssh "Them domain" "Domain > Them domain"; fi ;;
         dom_del)  _can && pick_domain domdel "🗑️ Chon domain de XOA:" || note_ssh "Xoa domain" "Domain" ;;
         dom_http3) pick_domain http3 "🔀 Chon domain bat/tat HTTP3:" ;;
         db_list)
@@ -274,7 +287,10 @@ ${out:-（chua co）}"; KB=$(kb_rows "$(BACK m:domain)") ;;
 "; done < <(_dbs)
             TEXT="🗄️ <b>Database</b>
 ${out:-（chua co）}"; KB=$(kb_rows "$(BACK m:db)") ;;
-        db_add)   _can && start_flow "${chat}" db_add "Nhap <b>ten database</b> muon tao:" || note_ssh "Tao DB" "LEMP > Database" ;;
+        db_add)   if _can; then start_flow "${chat}" db_add "🗄️ Nhap <b>ten database</b> muon tao (chi chu/so/_):"
+                    TEXT="🗄️ <b>Tao Database</b>
+✍️ Nhap <b>ten database</b> vao o chat ben duoi roi gui (chi chu/so/gach duoi).
+Go /huy de huy."; KB=$(kb_rows "[$(btn '❌ Huy' m:db)]"); else note_ssh "Tao DB" "LEMP > Database"; fi ;;
         db_del)   _can && pick_db dbdel "🗑️ Chon DB de XOA:" || note_ssh "Xoa DB" "LEMP > Database" ;;
         db_pass)  note_ssh "Doi mat khau DB" "LEMP > Database > Doi mat khau" ;;
         wp_list)  pick_domain wpinfo "📝 Chon site WordPress:" ;;
