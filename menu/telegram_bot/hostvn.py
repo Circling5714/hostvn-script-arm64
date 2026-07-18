@@ -817,6 +817,39 @@ def cf_waf_status() -> str:
             f"Cron đồng bộ: {cron or '0'} mục")
 
 
+PERMCTL = "/var/hostvn/menu/controller/permission"
+
+
+def perm_check(domain: str) -> str:
+    """Doc quyen/chu so huu hien tai (chi xem, khong doi gi)."""
+    uc = read_user_conf(domain)
+    user = uc.get("username", "")
+    if not user:
+        return "Không tìm thấy user của domain."
+    home = f"/home/{user}/{domain}"
+    out = sh(f"stat -c '%A %U:%G  %n' /home/{shlex.quote(user)} {shlex.quote(home)} "
+             f"{shlex.quote(home)}/public_html 2>/dev/null", 20)
+    odd_d = sh(f"find {shlex.quote(home)}/public_html -type d ! -perm 755 2>/dev/null | wc -l", 30)
+    odd_f = sh(f"find {shlex.quote(home)}/public_html -type f ! -perm 644 2>/dev/null | wc -l", 30)
+    wrong = sh(f"find {shlex.quote(home)} ! -user {shlex.quote(user)} 2>/dev/null | wc -l", 30)
+    return (f"{out}\n\nThư mục khác 755 : {odd_d}\n"
+            f"File khác 644     : {odd_f}\n"
+            f"Sai chủ sở hữu    : {wrong}")
+
+
+def perm_apply_one(domain: str) -> tuple[bool, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    out = run_ctl(f"{idx}\ny", f"{PERMCTL}/one", 600)
+    return True, _ctl_reason(out, f"Đã phân quyền lại cho {domain}.")
+
+
+def perm_apply_all() -> tuple[bool, str]:
+    out = run_ctl("", f"{PERMCTL}/all", 900)
+    return True, _ctl_reason(out, "Đã phân quyền lại toàn bộ website.")
+
+
 def php_versions() -> list[str]:
     out = sh("ls /etc/php 2>/dev/null", 10)
     return sorted(x for x in out.split() if x[:1].isdigit())

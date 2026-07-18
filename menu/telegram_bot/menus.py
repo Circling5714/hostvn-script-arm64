@@ -26,8 +26,18 @@ MAIN_MENU: list[list[tuple[str, str]]] = [
     [(C.F_CACHE,  f"{C.E['cache']} Cache"),     (C.F_BACKUP, f"{C.E['backup']} Backup")],
     [(C.F_FW,     f"{C.E['fw']} Firewall"),     (C.F_SVC,  f"{C.E['svc']} Dịch vụ")],
     [(C.F_SYS,    f"{C.E['sys']} Hệ thống"),    (C.F_VPS,  f"{C.E['vps']} VPS")],
-    [(C.F_TOOL,   f"{C.E['tool']} Công cụ")],
+    [(C.F_TOOL,   f"{C.E['tool']} Công cụ"),
+     (C.F_PERM,   f"{C.E['perm']} Phân quyền")],
 ]
+
+
+def perm_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '6. Phan quyen Chown/Chmod' cua shell."""
+    return rows_menu([
+        [(f"{C.E['list']} Kiểm tra quyền hiện tại", "a|perm_check")],
+        [(f"{C.E['key']} Phân quyền 1 website", "a|perm_one")],
+        [(f"{C.E['refresh']} Phân quyền TOÀN BỘ website", "a|perm_all")],
+    ])
 
 
 def lemp_menu() -> InlineKeyboardMarkup:
