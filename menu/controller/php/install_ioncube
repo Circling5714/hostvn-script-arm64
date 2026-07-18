@@ -30,9 +30,14 @@ _confirm(){
 _download_ioncube(){
     if [ ! -d "/usr/local/ioncube" ]; then
         _cd_dir /usr/local
-        wget http://downloads3.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz
-        tar xzf ioncube_loaders_lin_x86-64.tar.gz
-        rm -rf ioncube_loaders_lin_x86-64.tar.gz
+        # ionCube co ban aarch64 rieng (ten .so ben trong giong het x86-64, chi khac tarball)
+        if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
+            wget https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_aarch64.tar.gz -O ioncube_loaders.tar.gz
+        else
+            wget http://downloads3.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz -O ioncube_loaders.tar.gz
+        fi
+        tar xzf ioncube_loaders.tar.gz
+        rm -rf ioncube_loaders.tar.gz
     fi
 }
 

@@ -38,6 +38,12 @@ _select_swap_action() {
 }
 
 _create_swap() {
+    if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
+        clear
+        printf "%s\n" "${RED}Moi truong container (Android/LXC) khong the tao swap tu ben trong.${NC}"
+        printf "%s\n" "${RED}Vui long cau hinh swap tren thiet bi/host (VD: zram tren Android).${NC}"
+        return
+    fi
     if [ -n "${check_swap}" ]; then
         notify="${RED}VPS da co Swap.${NC}"
     else

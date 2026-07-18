@@ -60,7 +60,7 @@ _confirm_enable_remote_mysql() {
 
 _enable_remote_mysql() {
     if [[ "${confirm_enable_remote}" =~ ^([yY])$ ]]; then
-        ufw allow 3306/tcp
+        [ "${HOSTVN_FIREWALL}" = "yes" ] && ufw allow 3306/tcp
         clear
         user_remote_mysql=$(grep -w "user_remote_mysql" "${FILE_INFO}" | cut -f2 -d'=')
         password_remote_mysql=$(grep -w "password_remote_mysql" "${FILE_INFO}" | cut -f2 -d'=')
@@ -125,7 +125,7 @@ _confirm_disable_remote_mysql() {
 
 _disable_remote_mysql() {
     if [[ "${confirm_disable_remote}" =~ ^([yY])$ ]]; then
-        ufw deny 3306/tcp
+        [ "${HOSTVN_FIREWALL}" = "yes" ] && ufw deny 3306/tcp
         notify="${GREEN}Tat Remote Mysql thanh cong.${NC}"
     else
         notify="${RED}Huy thao tac.${NC}"
