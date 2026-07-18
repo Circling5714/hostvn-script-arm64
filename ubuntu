@@ -37,7 +37,7 @@ fi
 welcome(){
     clear
     printf "========================================================\n"
-    echo   "                   HOSTVN.VN Scripts                      "
+    echo   "                    HostVN Scripts                       "
     echo   "     Auto Install & Optimize LEMP Stack on Ubuntu         "
     echo   "        Ho tro Ubuntu 22.04 / 24.04 / 26.04 LTS           "
     printf "========================================================\n"
@@ -74,7 +74,7 @@ remove_old_service(){
     rm -rf /usr/lib/nginx/modules
     rm -rf /usr/bin/hostvn
     apt-get clean all
-    sed -i '/HOSTVN.VN/d' "$HOME/.bashrc"
+    sed -i '/HostVN/d' "$HOME/.bashrc"
     sed -i '/hostvn/d' "$HOME/.bashrc"
     sed -i '/filetransfer/d' /etc/ssh/sshd_config
     sed -i '/Prevent user access/d' /etc/ssh/sshd_config
