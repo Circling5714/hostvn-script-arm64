@@ -26,13 +26,18 @@ FILE_INFO="/var/hostvn/.hostvn.conf"
 VHOST_DIR="/etc/nginx/conf.d"
 
 # ============================================================ Telegram API
-# curl toi Telegram, kiem tra '"ok":true'; thu lai 2 lan (WiFi dien thoai co the rot goi)
+# curl toi Telegram. CHI thu lai khi KHONG ket noi duoc (curl rc 6/7 = chua gui gi
+# -> an toan gui lai). Khi curl hoan tat (rc 0) coi nhu DA gui -> KHONG gui lai
+# (tranh nhan doi tin khi WiFi dien thoai phan hoi cham). Loi khac: bo qua.
 _tg_call() { # endpoint  data-urlencode-args...
-    local ep="$1"; shift; local i out
+    local ep="$1"; shift; local i rc
     for i in 1 2 3; do
-        out=$(curl -s --max-time 20 "${API}/${ep}" "$@" 2>/dev/null)
-        [[ "${out}" == *'"ok":true'* || "${out}" == *"not modified"* ]] && return 0
-        sleep 1
+        curl -s --max-time 25 -o /dev/null "${API}/${ep}" "$@" >/dev/null 2>&1; rc=$?
+        case $rc in
+            0) return 0 ;;      # request hoan tat -> tin da toi Telegram
+            6|7) sleep 2 ;;     # DNS/connect fail -> chac chan chua gui -> thu lai
+            *) return "$rc" ;;  # timeout/khac -> khong lap de tranh nhan doi
+        esac
     done
     return 1
 }
