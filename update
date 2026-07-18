@@ -427,7 +427,11 @@ server {
         stub_status on;
         access_log   off;
         allow 127.0.0.1;
-        allow ${IPADDRESS};
+        # Cho phep toan bo dai LAN rieng (RFC1918) - IP LAN do DHCP cap co the doi,
+        # hardcode 1 IP se lam mat quyen truy cap Admin Tool khi router cap IP khac.
+        allow 10.0.0.0/8;
+        allow 172.16.0.0/12;
+        allow 192.168.0.0/16;
         deny all;
     }
 
@@ -437,7 +441,11 @@ server {
         fastcgi_param SCRIPT_FILENAME  \$document_root\$fastcgi_script_name;
         include /etc/nginx/fastcgi_params;
         allow 127.0.0.1;
-        allow ${IPADDRESS};
+        # Cho phep toan bo dai LAN rieng (RFC1918) - IP LAN do DHCP cap co the doi,
+        # hardcode 1 IP se lam mat quyen truy cap Admin Tool khi router cap IP khac.
+        allow 10.0.0.0/8;
+        allow 172.16.0.0/12;
+        allow 192.168.0.0/16;
         deny all;
     }
 
