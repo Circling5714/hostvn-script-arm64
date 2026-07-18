@@ -66,11 +66,11 @@ def back_only(target: str = C.CB_HOME) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([back_row(target)])
 
 
-def confirm_menu(what: str, param: str = "") -> InlineKeyboardMarkup:
-    data = f"yes|{what}" + (f"|{param}" if param else "")
+def confirm_menu(what: str, *params: str, back: str = C.CB_HOME) -> InlineKeyboardMarkup:
+    data = "|".join(["yes", what, *[p for p in params if p]])
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(f"{C.E['confirm']} Đồng ý", callback_data=data),
-        InlineKeyboardButton(C.LBL_CANCEL, callback_data=C.CB_HOME),
+        InlineKeyboardButton(C.LBL_CANCEL, callback_data=back),
     ]])
 
 
@@ -117,7 +117,52 @@ def cache_menu() -> InlineKeyboardMarkup:
 
 
 def backup_menu() -> InlineKeyboardMarkup:
-    return rows_menu([[(f"{C.E['info']} Remote rclone", "a|bk_list")]])
+    """Mirror menu 'Sao luu/Khoi phuc du lieu' cua shell hostvn."""
+    return rows_menu([
+        [(f"{C.E['backup']} Backup website", "a|bk_run")],
+        [(f"♻️ Khôi phục (Restore)", "a|bk_restore")],
+        [(f"{C.E['list']} Danh sách bản backup", "a|bk_list")],
+        [(f"{C.E['del']} Xoá bản backup", "a|bk_del")],
+        [("⏰ Auto backup (cron)", "a|bk_auto")],
+        [("☁️ Remote đã kết nối", "a|bk_remotes")],
+        [("🔗 Kết nối GDrive / OneDrive / S3", "a|bk_connect")],
+    ])
+
+
+def backup_type_menu(domain: str, back: str = "m|backup") -> InlineKeyboardMarkup:
+    """Chon loai backup -> bk|run|<type>|<domain>."""
+    return rows_menu([
+        [(f"{C.E['confirm']} Full (mã nguồn + DB)", f"bk|run|full|{domain}")],
+        [("📁 Chỉ mã nguồn", f"bk|run|source|{domain}")],
+        [(f"{C.E['db']} Chỉ database", f"bk|run|db|{domain}")],
+    ], back=back)
+
+
+def restore_type_menu(domain: str, date: str, back: str = "m|backup") -> InlineKeyboardMarkup:
+    """Chon loai khoi phuc -> bk|rst|<type>|<domain>|<date>."""
+    return rows_menu([
+        [(f"{C.E['confirm']} Full (mã nguồn + DB)", f"bk|rst|full|{domain}|{date}")],
+        [("📁 Chỉ mã nguồn", f"bk|rst|source|{domain}|{date}")],
+        [(f"{C.E['db']} Chỉ database", f"bk|rst|db|{domain}|{date}")],
+    ], back=back)
+
+
+def backup_date_menu(domain: str, dates: list[str], back: str = "m|backup") -> InlineKeyboardMarkup:
+    """Chon ngay backup de khoi phuc: bk|rsd|<domain>|<date>."""
+    rows = [[(f"📅 {d}", f"bk|rsd|{domain}|{d}")] for d in dates[:20]]
+    return rows_menu(rows, back=back)
+
+
+def backup_entry_menu(rows_data: list[tuple[str, str, str]], action: str,
+                      back: str = "m|backup") -> InlineKeyboardMarkup:
+    """rows_data: list (domain, date, nhan). callback bk|<action>|<domain>|<date>."""
+    rows = [[(label, f"bk|{action}|{dom}|{dt}")] for dom, dt, label in rows_data[:20]]
+    return rows_menu(rows, back=back)
+
+
+def remotes_menu(remotes: list[str], back: str = "m|backup") -> InlineKeyboardMarkup:
+    rows = [[(f"☁️ {r}", f"bk|rmdel|{r}")] for r in remotes[:15]]
+    return rows_menu(rows, back=back)
 
 
 def fw_menu() -> InlineKeyboardMarkup:

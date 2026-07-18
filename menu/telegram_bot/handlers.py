@@ -26,7 +26,8 @@ E = C.E
 title = texts.title
 pre = texts.pre
 
-WRITE_ACTIONS = {"dom_add", "db_add", "cache_clear", "opcache_clear", "php_restart"}
+WRITE_ACTIONS = {"dom_add", "db_add", "cache_clear", "opcache_clear", "php_restart",
+                 "bk_run", "bk_restore", "bk_del"}
 
 
 # --------------------------------------------------------------------------- #
@@ -341,6 +342,28 @@ async def cb_action(update, context, action, params):
         return await start_flow(update, context, "db_add", "m|db",
                                 E["db"], "Tạo database",
                                 "Nhập <b>tên database</b> (chỉ chữ/số/gạch dưới):")
+    # ----- Backup: cac buoc rieng -----
+    if action == "bk_del":
+        return await _progress_op(
+            update, True, "⏳ <b>Đang quét bản backup…</b>",
+            asyncio.to_thread(hostvn.list_backups),
+            lambda rows: (
+                title(E["del"], "Xoá bản backup",
+                      "Chọn bản muốn xoá:" if rows else "Chưa có bản backup nào."),
+                menus.backup_entry_menu(
+                    [(r["domain"], r["date"], f"{E['del']} {r['domain']} · {r['date']} ({r['size']})")
+                     for r in rows], "del")),
+            est=4.0)
+    if action == "bk_remotes":
+        return await _progress_op(
+            update, True, "⏳ <b>Đang đọc cấu hình rclone…</b>",
+            asyncio.to_thread(hostvn.rclone_remotes),
+            lambda rs: (title("☁️", "Remote đã kết nối",
+                              (pre("\n".join(rs)) + "\nBấm để <b>xoá</b> kết nối.") if rs
+                              else "Chưa kết nối remote nào."),
+                        menus.remotes_menu(rs)),
+            est=3.0)
+
     # ----- Cac picker (tai danh sach) -----
     PICKERS = {
         "dom_info": (hostvn.list_domains, "dominfo", E["domain"], "m|domain",
@@ -351,6 +374,10 @@ async def cb_action(update, context, action, params):
                      (E["del"], "Xoá database", "Chọn DB để XOÁ:")),
         "wp_cache": (hostvn.list_domains, "wpcache", E["wp"], "m|wp",
                      (E["wp"], "Xoá cache WP", "Chọn site:")),
+        "bk_run":   (hostvn.list_domains, "bkdom", E["backup"], "m|backup",
+                     (E["backup"], "Backup website", "Chọn website cần backup:")),
+        "bk_restore": (hostvn.list_domains, "rsdom", E["domain"], "m|backup",
+                       ("♻️", "Khôi phục dữ liệu", "Chọn website cần khôi phục:")),
     }
     if action in PICKERS:
         loader, pick_act, emo, back, (t_emo, t_head, t_hint) = PICKERS[action]
@@ -403,8 +430,24 @@ def _run_action(action: str, chat: int):
     if action == "largefiles":
         return title(E["tool"], "File lớn /home", pre(hostvn.largefiles())), "m|tool"
     if action == "bk_list":
-        out = hostvn.sh("rclone listremotes 2>/dev/null", 10) or "(chưa cấu hình remote)"
-        return title(E["backup"], "Remote rclone", pre(out)), "m|backup"
+        rows = hostvn.list_backups()
+        if not rows:
+            body = "(chưa có bản backup nào)"
+        else:
+            body = "\n".join(f"{r['date']}  {r['domain']}  {r['size']}\n   " +
+                             ", ".join(r["files"]) for r in rows[:15])
+        return (title(E["backup"], "Danh sách bản backup",
+                      pre(body) + f"\nThư mục: <code>{hostvn.BACKUP_ROOT}</code>"), "m|backup")
+    if action == "bk_auto":
+        return (title("⏰", "Auto backup", pre(hostvn.autobackup_info()) +
+                      "\n<i>Đặt lịch chi tiết ở menu Cronjob trong shell.</i>"), "m|backup")
+    if action == "bk_connect":
+        return (title("🔗", "Kết nối kho lưu trữ",
+                      "Google Drive và OneDrive cần đăng nhập OAuth qua trình duyệt, "
+                      "còn S3 cần nhập access key/secret — <b>không an toàn khi gõ qua chat</b>.\n\n"
+                      "Vui lòng chạy qua SSH:\n<code>hostvn</code> → <b>8. Sao luu/Khoi phuc</b> → "
+                      "mục 4 (GDrive) / 6 (OneDrive) / 7 (S3).\n\n"
+                      "Sau khi kết nối xong, remote sẽ hiện ở <b>☁️ Remote đã kết nối</b>."), "m|backup")
     # write:
     if action == "cache_clear":
         return title(E["cache"], "Xoá cache", hostvn.clear_fastcgi()), "m|cache"
@@ -437,6 +480,25 @@ async def cb_pick(update, context, action, params):
             asyncio.to_thread(_wp_cache_flush, target),
             lambda _: (title(E["wp"], target, "Đã xoá cache WordPress (nếu có)."),
                        menus.back_only("m|wp")), est=6.0)
+    if action == "bkdom":     # chon website -> chon loai backup
+        if not can_write(chat):
+            return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                             reply_markup=menus.back_only("m|backup"))
+        return await q.edit_message_text(
+            title(E["backup"], f"Backup {target}", "Chọn nội dung cần backup:"),
+            parse_mode=HTML, reply_markup=menus.backup_type_menu(target))
+    if action == "rsdom":     # chon website -> chon ngay backup
+        if not can_write(chat):
+            return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                             reply_markup=menus.back_only("m|backup"))
+        return await _progress_op(
+            update, True, f"⏳ <b>Đang tìm bản backup của</b> {texts.esc(target)}…",
+            asyncio.to_thread(hostvn.backup_dates, target),
+            lambda dates: (title("♻️", f"Khôi phục {target}",
+                                 "Chọn ngày backup:" if dates
+                                 else "Website này chưa có bản backup nào."),
+                           menus.backup_date_menu(target, dates)),
+            est=3.0)
     if action == "domdel":
         if not can_write(chat):
             return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
@@ -523,6 +585,78 @@ async def cb_nd(update, context, typ, params):
                        render, est=est, stages=stages)
 
 
+# ---- Backup / Restore (mien "bk") ------------------------------------------ #
+async def cb_bk(update, context, action, params):
+    q = update.callback_query
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_BACKUP):
+        return await q.edit_message_text(texts.DENY, parse_mode=HTML)
+    if not can_write(chat):
+        return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                         reply_markup=menus.back_only("m|backup"))
+
+    # bk|run|<type>|<domain>  -> chay backup ngay
+    if action == "run":
+        btype = params[0] if params else "full"
+        domain = params[1] if len(params) > 1 else ""
+        names = {"full": "full (mã nguồn + DB)", "source": "mã nguồn", "db": "database"}
+        return await _progress_op(
+            update, True,
+            f"{E['backup']} <b>Đang backup</b> {texts.esc(domain)} — {names.get(btype, btype)}…",
+            asyncio.to_thread(hostvn.backup_site, domain, btype),
+            lambda r: ((title(E["confirm"], f"Backup {domain}",
+                              f"<code>{progress.bar(100)}</code>\n{r[1]}\n"
+                              f"Thư mục: <code>{texts.esc(r[2])}</code>") if r[0]
+                        else title(E["warn"], f"Backup {domain} thất bại", texts.esc(r[1]))),
+                       menus.back_only("m|backup")),
+            est=45.0,
+            stages=[(30, f"📁 <b>Đang nén mã nguồn</b> {texts.esc(domain)}…"),
+                    (70, f"{E['db']} <b>Đang dump database</b>…"),
+                    (90, "🔄 <b>Đang hoàn tất</b>…")])
+
+    # bk|rsd|<domain>|<date> -> chon loai khoi phuc
+    if action == "rsd":
+        domain = params[0] if params else ""
+        date = params[1] if len(params) > 1 else ""
+        return await q.edit_message_text(
+            title("♻️", f"Khôi phục {domain}", f"Bản ngày <b>{texts.esc(date)}</b>. Chọn nội dung:"),
+            parse_mode=HTML, reply_markup=menus.restore_type_menu(domain, date))
+
+    # bk|rst|<type>|<domain>|<date> -> XAC NHAN (ghi de du lieu hien tai)
+    if action == "rst":
+        rtype = params[0] if params else "full"
+        domain = params[1] if len(params) > 1 else ""
+        date = params[2] if len(params) > 2 else ""
+        what = {"full": "mã nguồn + database", "source": "mã nguồn", "db": "database"}.get(rtype, rtype)
+        return await q.edit_message_text(
+            title(E["warn"], "Xác nhận khôi phục",
+                  f"Khôi phục <b>{what}</b> cho <b>{texts.esc(domain)}</b> "
+                  f"từ bản <b>{texts.esc(date)}</b>?\n\n"
+                  f"⚠️ Dữ liệu hiện tại sẽ bị <b>GHI ĐÈ</b>."),
+            parse_mode=HTML,
+            reply_markup=menus.confirm_menu("rst", rtype, domain, date, back="m|backup"))
+
+    # bk|del|<domain>|<date> -> XAC NHAN xoa ban backup
+    if action == "del":
+        domain = params[0] if params else ""
+        date = params[1] if len(params) > 1 else ""
+        return await q.edit_message_text(
+            title(E["warn"], "Xác nhận xoá backup",
+                  f"Xoá bản backup <b>{texts.esc(domain)}</b> ngày <b>{texts.esc(date)}</b>?"),
+            parse_mode=HTML,
+            reply_markup=menus.confirm_menu("bkdel", domain, date, back="m|backup"))
+
+    # bk|rmdel|<remote> -> XAC NHAN xoa ket noi rclone
+    if action == "rmdel":
+        remote = params[0] if params else ""
+        return await q.edit_message_text(
+            title(E["warn"], "Xác nhận xoá kết nối",
+                  f"Xoá remote <b>{texts.esc(remote)}</b> khỏi rclone?\n"
+                  f"<i>Chỉ xoá cấu hình kết nối, không xoá dữ liệu trên cloud.</i>"),
+            parse_mode=HTML,
+            reply_markup=menus.confirm_menu("rmdel", remote, back="m|backup"))
+
+
 # ---- Xac nhan thao tac nguy hiem (cf / yes) --------------------------------- #
 async def cb_cf(update, context, action, params):
     q = update.callback_query
@@ -578,6 +712,40 @@ async def cb_yes(update, context, what, params):
             stages=[(40, f"{E['del']} <b>Xoá vHost &amp; PHP pool</b>…"),
                     (70, f"{E['del']} <b>Xoá user, thư mục &amp; database</b>…")],
         )
+    if what == "rst":       # yes|rst|<type>|<domain>|<date>
+        rtype = params[0] if params else "full"
+        domain = params[1] if len(params) > 1 else ""
+        date = params[2] if len(params) > 2 else ""
+        return await _progress_op(
+            update, True, f"♻️ <b>Đang khôi phục</b> {texts.esc(domain)} ({texts.esc(date)})…",
+            asyncio.to_thread(hostvn.restore_site, domain, date, rtype),
+            lambda r: ((title(E["confirm"], "Khôi phục xong",
+                              f"<code>{progress.bar(100)}</code>\n{texts.esc(r[1])}") if r[0]
+                        else title(E["warn"], "Khôi phục thất bại", texts.esc(r[1]))),
+                       menus.back_only("m|backup")),
+            est=45.0,
+            stages=[(35, "📁 <b>Đang giải nén mã nguồn</b>…"),
+                    (70, f"{E['db']} <b>Đang import database</b>…"),
+                    (90, "🔄 <b>Đang phân quyền lại</b>…")])
+    if what == "bkdel":     # yes|bkdel|<domain>|<date>
+        domain = params[0] if params else ""
+        date = params[1] if len(params) > 1 else ""
+        return await _progress_op(
+            update, True, f"{E['del']} <b>Đang xoá backup</b> {texts.esc(domain)} {texts.esc(date)}…",
+            asyncio.to_thread(hostvn.delete_backup, domain, date),
+            lambda ok: ((title(E["confirm"], "Đã xoá bản backup",
+                               f"{texts.esc(domain)} · {texts.esc(date)}") if ok
+                         else title(E["warn"], "Không xoá được", "Kiểm tra lại bản backup.")),
+                        menus.back_only("m|backup")),
+            est=6.0)
+    if what == "rmdel":     # yes|rmdel|<remote>
+        return await _progress_op(
+            update, True, f"{E['del']} <b>Đang xoá remote</b> {texts.esc(param)}…",
+            asyncio.to_thread(hostvn.rclone_delete_remote, param),
+            lambda ok: ((title(E["confirm"], "Đã xoá kết nối", texts.esc(param)) if ok
+                         else title(E["warn"], "Không xoá được", texts.esc(param))),
+                        menus.back_only("m|backup")),
+            est=4.0)
     if what == "dbdel":
         return await _progress_op(
             update, True, f"{E['del']} <b>Đang xoá database</b> {texts.esc(param)}…",
@@ -651,5 +819,5 @@ async def handle_flow(update, context, flow, text):
 
 CALLBACK_ROUTES = {
     "nav": cb_nav, "m": cb_open, "a": cb_action, "svc": cb_svc, "do": cb_do,
-    "pick": cb_pick, "nd": cb_nd, "cf": cb_cf, "yes": cb_yes,
+    "pick": cb_pick, "nd": cb_nd, "cf": cb_cf, "yes": cb_yes, "bk": cb_bk,
 }
