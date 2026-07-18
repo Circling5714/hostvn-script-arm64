@@ -31,7 +31,9 @@ WRITE_ACTIONS = {"dom_add", "db_add", "cache_clear", "opcache_clear", "php_resta
                  "dom_rename", "dom_rewrite", "dom_php", "dom_alias", "dom_redirect",
                  "dom_sftp", "dom_protect", "dom_http3", "dom_clone", "dom_dbinfo",
                  "ssl_create", "ssl_wildcard", "ssl_remove", "ssl_alias",
-                 "ssl_renew", "ssl_cfapi"}
+                 "ssl_renew", "ssl_cfapi",
+                 "cache_clear_all", "cache_mc", "cache_redis",
+                 "cache_opcache", "cache_fastcgi"}
 
 
 # --------------------------------------------------------------------------- #
@@ -346,6 +348,39 @@ async def cb_action(update, context, action, params):
         return await start_flow(update, context, "db_add", "m|db",
                                 E["db"], "Tạo database",
                                 "Nhập <b>tên database</b> (chỉ chữ/số/gạch dưới):")
+    # ----- Cache: cac buoc rieng -----
+    if action in ("cache_mc", "cache_redis"):
+        name = "memcached" if action == "cache_mc" else "redis"
+        def _mk(_n=name):
+            installed = bool(hostvn.sh(
+                f"command -v {'redis-server' if _n == 'redis' else 'memcached'}", 10))
+            running = hostvn.svc_status(_n) == "active"
+            ic = E["on"] if running else E["off"]
+            body = (f"Cài đặt : {'có' if installed else 'chưa'}\n"
+                    f"Trạng thái: {hostvn.svc_status(_n)}")
+            return (title(E["cache"], _n.capitalize(), f"{ic}\n" + pre(body)),
+                    menus.svc_pkg_menu(_n, running, installed))
+        return await _progress_op(update, True, f"⏳ <b>Đang kiểm tra {name}…</b>",
+                                  asyncio.to_thread(_mk), lambda r: r, est=4.0)
+    if action == "cache_opcache":
+        return await q.edit_message_text(
+            title(E["php"], "PHP OPcache", "Chọn thao tác:"),
+            parse_mode=HTML, reply_markup=menus.opcache_menu())
+    if action == "cache_fastcgi":
+        def _fc():
+            on, off = hostvn.fastcgi_domains(True), hostvn.fastcgi_domains(False)
+            body = (f"Đang bật: {', '.join(on) or '(không có)'}\n"
+                    f"Đang tắt: {', '.join(off) or '(không có)'}")
+            return (title("🚀", "Nginx FastCGI cache", pre(body)),
+                    menus.fastcgi_menu(on, off))
+        return await _progress_op(update, True, "⏳ <b>Đang đọc cấu hình vHost…</b>",
+                                  asyncio.to_thread(_fc), lambda r: r, est=4.0)
+    if action == "cache_clear_all":
+        return await q.edit_message_text(
+            title(E["warn"], "Xoá toàn bộ cache",
+                  "Sẽ restart Redis/Memcached và xoá cache của tất cả website. Tiếp tục?"),
+            parse_mode=HTML, reply_markup=menus.confirm_menu("clrall", back="m|cache"))
+
     # ----- SSL: cac buoc rieng -----
     if action == "ssl_cfapi":
         return await _progress_op(
@@ -491,6 +526,13 @@ def _run_action(action: str, chat: int):
     if action == "bk_auto":
         return (title("⏰", "Auto backup", pre(hostvn.autobackup_info()) +
                       "\n<i>Đặt lịch chi tiết ở menu Cronjob trong shell.</i>"), "m|backup")
+    if action == "cache_status":
+        return title(E["cache"], "Trạng thái cache", pre(hostvn.cache_status())), "m|cache"
+    if action == "opcache_bl":
+        return (title("🚫", "OPcache blacklist",
+                      "Thêm/xoá website khỏi blacklist OPcache cần chọn website và "
+                      "sửa file cấu hình PHP.\n\nChạy qua SSH: <code>hostvn</code> → "
+                      "<b>3. Quan ly Cache</b> → <b>3. PHP Opcache</b>."), "m|cache")
     if action == "ssl_list":
         rows = hostvn.ssl_list()
         icon = {"letsencrypt": "🔒", "self-signed": "🟡", "none": "🔓"}
@@ -735,6 +777,58 @@ async def cb_nd(update, context, typ, params):
                        render, est=est, stages=stages)
 
 
+# ---- Cache (mien "cc") ------------------------------------------------------ #
+async def cb_cc(update, context, action, params):
+    q = update.callback_query
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_CACHE):
+        return await q.edit_message_text(texts.DENY, parse_mode=HTML)
+    if not can_write(chat):
+        return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                         reply_markup=menus.back_only("m|cache"))
+    arg = params[0] if params else ""
+
+    if action in ("on", "off", "restart"):        # bat/tat/restart redis|memcached
+        act = {"on": "start", "off": "stop", "restart": "restart"}[action]
+        return await _progress_op(
+            update, True, f"{E['refresh']} <b>Đang {act} {texts.esc(arg)}</b>…",
+            asyncio.to_thread(_svc_act_then_status, act, arg),
+            lambda st: (title(E["confirm"], arg, f"Trạng thái: <b>{texts.esc(st)}</b>"),
+                        menus.back_only("m|cache")),
+            est=8.0)
+
+    if action in ("install", "uninstall"):        # apt: nang, hoi xac nhan truoc
+        return await q.edit_message_text(
+            title(E["warn"], "Xác nhận",
+                  f"{'Cài đặt' if action == 'install' else 'Gỡ bỏ'} <b>{texts.esc(arg)}</b>"
+                  f"{' (kèm extension PHP)' if action == 'install' else ''}? "
+                  f"Thao tác apt có thể mất vài phút."),
+            parse_mode=HTML,
+            reply_markup=menus.confirm_menu(f"pkg{action}", arg, back="m|cache"))
+
+    if action in ("opon", "opoff"):               # bat/tat OPcache
+        on = action == "opon"
+        return await _progress_op(
+            update, True, f"{E['php']} <b>Đang {'bật' if on else 'tắt'} OPcache</b>…",
+            asyncio.to_thread(hostvn.run_ctl, "1" if on else "2",
+                              "/var/hostvn/menu/controller/cache/opcache/enable_disable", 120),
+            lambda out: (title(E["php"], "OPcache",
+                               pre(hostvn._ctl_reason(out, "Đã gửi yêu cầu."))),
+                         menus.back_only("m|cache")),
+            est=15.0)
+
+    if action in ("fcon", "fcoff"):               # bat/tat FastCGI cache cho 1 domain
+        on = action == "fcon"
+        return await _progress_op(
+            update, True,
+            f"🚀 <b>Đang {'bật' if on else 'tắt'} FastCGI cache</b> — {texts.esc(arg)}…",
+            asyncio.to_thread(hostvn.cache_fastcgi_set, arg, on),
+            lambda r: ((title(E["confirm"], "FastCGI cache", texts.esc(r[1])) if r[0]
+                        else title(E["warn"], "Không đổi được", texts.esc(r[1]))),
+                       menus.back_only("m|cache")),
+            est=20.0)
+
+
 # ---- SSL (mien "ssl") ------------------------------------------------------- #
 async def cb_ssl(update, context, action, params):
     q = update.callback_query
@@ -921,6 +1015,23 @@ async def cb_yes(update, context, what, params):
             stages=[(40, f"{E['del']} <b>Xoá vHost &amp; PHP pool</b>…"),
                     (70, f"{E['del']} <b>Xoá user, thư mục &amp; database</b>…")],
         )
+    if what == "clrall":
+        return await _progress_op(
+            update, True, f"{E['cache']} <b>Đang xoá toàn bộ cache</b>…",
+            asyncio.to_thread(hostvn.cache_clear_all),
+            lambda msg: (title(E["confirm"], "Xoá cache",
+                               f"<code>{progress.bar(100)}</code>\n{texts.esc(msg)}"),
+                         menus.back_only("m|cache")), est=30.0)
+    if what in ("pkginstall", "pkguninstall"):
+        inst = what == "pkginstall"
+        return await _progress_op(
+            update, True,
+            f"{E['cache']} <b>Đang {'cài đặt' if inst else 'gỡ bỏ'}</b> {texts.esc(param)}…",
+            asyncio.to_thread(hostvn.pkg_service, param, inst),
+            lambda r: (title(E["confirm"] if r[0] else E["warn"], param, texts.esc(r[1])),
+                       menus.back_only("m|cache")), est=120.0,
+            stages=[(40, "📦 <b>Đang tải gói từ apt</b>…"), (75, "🔧 <b>Đang cấu hình</b>…")])
+
     # ----- SSL -----
     _SSL_OPS = {
         "sslnew":   (hostvn.ssl_create,   "Cấp SSL", 90.0),
@@ -1135,5 +1246,5 @@ async def handle_flow(update, context, flow, text):
 CALLBACK_ROUTES = {
     "nav": cb_nav, "m": cb_open, "a": cb_action, "svc": cb_svc, "do": cb_do,
     "pick": cb_pick, "nd": cb_nd, "cf": cb_cf, "yes": cb_yes, "bk": cb_bk,
-    "dm": cb_dm, "ssl": cb_ssl,
+    "dm": cb_dm, "ssl": cb_ssl, "cc": cb_cc,
 }

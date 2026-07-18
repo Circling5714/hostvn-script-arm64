@@ -361,11 +361,16 @@ def reboot() -> None:
 CTL = "/var/hostvn/menu/controller/domain"
 
 
-def domain_index(domain: str) -> int:
-    """So thu tu (1-based) cua domain trong menu _select_domain. 0 = khong thay."""
+def _glob_domains() -> list[str]:
+    """Danh sach domain THEO DUNG thu tu glob '.*.conf' ma cac _select_* cua shell dung."""
     out = sh('cd /var/hostvn/users 2>/dev/null && for f in .*.conf; do '
              'd=${f#.}; d=${d%.conf}; [ "$d" != "*" ] && printf "%s\\n" "$d"; done', 15)
-    doms = [x.strip() for x in out.splitlines() if x.strip()]
+    return [x.strip() for x in out.splitlines() if x.strip()]
+
+
+def domain_index(domain: str) -> int:
+    """So thu tu (1-based) cua domain trong menu _select_domain. 0 = khong thay."""
+    doms = _glob_domains()
     return doms.index(domain) + 1 if domain in doms else 0
 
 
@@ -664,6 +669,81 @@ def ssl_wildcard(domain: str) -> tuple[bool, str]:
         svc("reload", "nginx")
         return True, f"Đã cấp wildcard SSL cho *.{domain}."
     return False, _ctl_reason(out, "Không cấp được wildcard SSL.")
+
+
+# --------------------------------------------------------------------------- #
+# Quan ly Cache (mirror menu "3. Quan ly Cache")
+# --------------------------------------------------------------------------- #
+CACHECTL = "/var/hostvn/menu/controller/cache"
+
+
+def fastcgi_enabled(domain: str) -> bool:
+    """Giong check cua nginx_cache: vhost co include php_cache.conf / php_cache_woo.conf."""
+    conf = Path(C.VHOST_DIR) / f"{domain}.conf"
+    if not conf.exists():
+        return False
+    txt = conf.read_text(errors="replace")
+    return "php_cache.conf" in txt or "php_cache_woo.conf" in txt
+
+
+def fastcgi_domains(enabled: bool) -> list[str]:
+    """Danh sach domain theo dung thu tu + bo loc ma controller dung."""
+    return [d for d in _glob_domains() if fastcgi_enabled(d) == enabled]
+
+
+def cache_fastcgi_set(domain: str, enable: bool) -> tuple[bool, str]:
+    """Bat/Tat Nginx FastCGI cache cho 1 domain (index tinh trong danh sach DA LOC)."""
+    lst = fastcgi_domains(not enable)      # bat -> chon trong nhung cai DANG TAT
+    if domain not in lst:
+        return False, (f"{domain} đã bật FastCGI cache sẵn." if enable
+                       else f"{domain} chưa bật FastCGI cache.")
+    idx = lst.index(domain) + 1
+    out = run_ctl(f"{1 if enable else 2}\n{idx}", f"{CACHECTL}/nginx_cache", 180)
+    if fastcgi_enabled(domain) == enable:
+        svc("reload", "nginx")
+        return True, f"Đã {'bật' if enable else 'tắt'} FastCGI cache cho {domain}."
+    return False, _ctl_reason(out, "Không đổi được FastCGI cache.")
+
+
+def cache_status() -> str:
+    pv = php_version()
+    st = services_status(["redis", "memcached"])
+    opc = sh(f"php{pv} -i 2>/dev/null | grep -iE '^opcache.enable\\b' | head -1", 15)
+    ini = sh(f"ls /etc/php/{pv}/fpm/conf.d/ 2>/dev/null | grep -iE 'opcache|redis|memcach' | tr '\\n' ' '", 10)
+    on = [d for d in _glob_domains() if fastcgi_enabled(d)]
+    off = [d for d in _glob_domains() if not fastcgi_enabled(d)]
+    return (f"Redis     : {st.get('redis', '?')}\n"
+            f"Memcached : {st.get('memcached', '?')}\n"
+            f"OPcache   : {opc or '(không đọc được)'}\n"
+            f"PHP ext   : {ini or '(không có)'}\n"
+            f"FastCGI bật : {', '.join(on) or '(không có)'}\n"
+            f"FastCGI tắt : {', '.join(off) or '(không có)'}")
+
+
+def cache_clear_all() -> str:
+    """Chay controller clear_cache: restart redis/memcached + xoa cache tung website."""
+    out = run_ctl("", f"{CACHECTL}/clear_cache", 300)
+    return _ctl_reason(out, "Đã xoá cache toàn hệ thống.")
+
+
+def pkg_service(name: str, install: bool) -> tuple[bool, str]:
+    """Cai dat / go bo redis-server hoac memcached (kem extension PHP khi cai redis)."""
+    pv = php_version()
+    if name == "redis":
+        pkgs = f"redis-server php{pv}-redis php{pv}-igbinary"
+        probe = "redis-server"
+    else:
+        pkgs = f"memcached php{pv}-memcached"
+        probe = "memcached"
+    if install:
+        sh(f"DEBIAN_FRONTEND=noninteractive apt-get install -y {pkgs}", 900, merge=True)
+        ok = bool(sh(f"command -v {probe}", 10))
+        if ok:
+            svc("restart", f"php{pv}-fpm")
+        return ok, ("Đã cài đặt." if ok else "Cài đặt thất bại.")
+    sh(f"DEBIAN_FRONTEND=noninteractive apt-get purge -y {pkgs}", 900, merge=True)
+    ok = not sh(f"command -v {probe}", 10)
+    return ok, ("Đã gỡ bỏ." if ok else "Gỡ bỏ chưa hoàn tất.")
 
 
 def php_versions() -> list[str]:

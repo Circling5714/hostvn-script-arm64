@@ -150,12 +150,47 @@ def ssl_menu() -> InlineKeyboardMarkup:
 
 
 def cache_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '3. Quan ly Cache' cua shell."""
     return rows_menu([
-        [(f"{C.E['cache']} Xoá FastCGI cache", "a|cache_clear")],
-        [(f"{C.E['cache']} Clear OPcache", "a|opcache_clear")],
-        [(f"{C.E['refresh']} Restart Redis", "do|redis|restart"),
-         (f"{C.E['refresh']} Restart Memcached", "do|memcached|restart")],
+        [(f"{C.E['list']} Trạng thái cache", "a|cache_status")],
+        [(f"{C.E['cache']} Xoá toàn bộ cache", "a|cache_clear_all")],
+        [(f"{C.E['db']} Memcached", "a|cache_mc"),
+         ("🔴 Redis", "a|cache_redis")],
+        [(f"{C.E['php']} PHP OPcache", "a|cache_opcache")],
+        [("🚀 Nginx FastCGI cache", "a|cache_fastcgi")],
     ])
+
+
+def svc_pkg_menu(name: str, running: bool, installed: bool,
+                 back: str = "m|cache") -> InlineKeyboardMarkup:
+    """Quan ly 1 dich vu cache: bat/tat + cai/go. cb: cc|<act>|<name>."""
+    rows = []
+    if installed:
+        rows.append([(f"{C.E['stop']} Tắt", f"cc|off|{name}") if running
+                     else (f"{C.E['start']} Bật", f"cc|on|{name}"),
+                     (f"{C.E['refresh']} Restart", f"cc|restart|{name}")])
+        rows.append([(f"{C.E['del']} Gỡ bỏ", f"cc|uninstall|{name}")])
+    else:
+        rows.append([(f"{C.E['add']} Cài đặt", f"cc|install|{name}")])
+    return rows_menu(rows, back=back)
+
+
+def opcache_menu(back: str = "m|cache") -> InlineKeyboardMarkup:
+    return rows_menu([
+        [(f"{C.E['on']} Bật OPcache", "cc|opon|-"),
+         (f"{C.E['off']} Tắt OPcache", "cc|opoff|-")],
+        [(f"{C.E['cache']} Xoá OPcache", "a|opcache_clear")],
+        [("🚫 Blacklist website", "a|opcache_bl")],
+    ], back=back)
+
+
+def fastcgi_menu(on: list[str], off: list[str], back: str = "m|cache") -> InlineKeyboardMarkup:
+    """Bat cho domain dang tat, tat cho domain dang bat."""
+    rows = [[(f"{C.E['on']} Bật cho {d}", f"cc|fcon|{d}")] for d in off[:10]]
+    rows += [[(f"{C.E['off']} Tắt cho {d}", f"cc|fcoff|{d}")] for d in on[:10]]
+    if not rows:
+        rows = [[("(chưa có domain)", "noop")]]
+    return rows_menu(rows, back=back)
 
 
 def backup_menu() -> InlineKeyboardMarkup:
