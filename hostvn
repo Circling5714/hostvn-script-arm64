@@ -2181,7 +2181,11 @@ server {
         stub_status on;
         access_log   off;
         allow 127.0.0.1;
-        allow ${IPADDRESS};
+        # Cho phep toan bo dai LAN rieng (RFC1918) - IP LAN do DHCP cap co the doi,
+        # hardcode 1 IP se lam mat quyen truy cap Admin Tool khi router cap IP khac.
+        allow 10.0.0.0/8;
+        allow 172.16.0.0/12;
+        allow 192.168.0.0/16;
         deny all;
     }
 
@@ -2197,7 +2201,11 @@ server {
         fastcgi_param SCRIPT_FILENAME  \$document_root\$fastcgi_script_name;
         include /etc/nginx/fastcgi_params;
         allow 127.0.0.1;
-        allow ${IPADDRESS};
+        # Cho phep toan bo dai LAN rieng (RFC1918) - IP LAN do DHCP cap co the doi,
+        # hardcode 1 IP se lam mat quyen truy cap Admin Tool khi router cap IP khac.
+        allow 10.0.0.0/8;
+        allow 172.16.0.0/12;
+        allow 192.168.0.0/16;
         deny all;
     }
 
@@ -3480,9 +3488,16 @@ write_info() {
     chmod 600 "${FILE_INFO}" /etc/hostvn.lock
 
     if [[ ! -f "/var/hostvn/ipaddress" ]]; then
-        cat >>"/var/hostvn/ipaddress" <<END
+        # KHONG ghi cung IP: IP LAN do DHCP cap co the doi, ghi cung se lam
+        # sai duong dan backup / thong tin SFTP sau nay. Tu phat hien luc chay,
+        # van cho phep ep buoc bang bien moi truong HOSTVN_IP.
+        cat >>"/var/hostvn/ipaddress" <<'END'
 #!/bin/bash
-IPADDRESS=${IPADDRESS}
+IPADDRESS="${HOSTVN_IP:-}"
+[ -z "${IPADDRESS}" ] && IPADDRESS="$(ip route get 1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')"
+[ -z "${IPADDRESS}" ] && IPADDRESS="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -z "${IPADDRESS}" ] && IPADDRESS="127.0.0.1"
+export IPADDRESS
 END
     fi
 }
