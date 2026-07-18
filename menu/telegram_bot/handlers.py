@@ -35,7 +35,12 @@ WRITE_ACTIONS = {"dom_add", "db_add", "cache_clear", "opcache_clear", "php_resta
                  "cache_clear_all", "cache_mc", "cache_redis",
                  "cache_opcache", "cache_fastcgi",
                  "fw_ban", "fw_unban", "fw_jails",
-                 "perm_one", "perm_all"}
+                 "perm_one", "perm_all",
+                 "wp_core", "wp_plugins", "wp_plugupd", "wp_plugoff", "wp_optimize",
+                 "wp_moveconf", "wp_htpasswd", "wp_edit", "wp_lockdown",
+                 "wpa_yoast", "wpa_rank", "wpa_webp", "wpa_cacheplug",
+                 "wpa_cachekey", "wpa_debug", "wpa_maint", "wpa_xmlrpc",
+                 "wpa_userapi", "wpa_cron", "wpa_revision"}
 
 
 # --------------------------------------------------------------------------- #
@@ -192,6 +197,14 @@ def _screen_php():
     return title(E["php"], f"PHP {hostvn.php_version()}", ""), menus.php_menu()
 
 
+def _screen_wpadv():
+    return title(E["wp"], "WordPress nâng cao", "Chọn thao tác:"), menus.wp_adv_menu()
+
+
+def _screen_wpplug():
+    return title("🧩", "Plugins manager", "Chọn thao tác:"), menus.wp_plugins_menu()
+
+
 def _screen_perm():
     return (title(E["perm"], "Phân quyền Chown/Chmod",
                   "Đặt lại quyền chuẩn: thư mục 755, file 644, chủ sở hữu là user của website."),
@@ -268,6 +281,7 @@ GROUP_SCREENS = {
     C.F_LEMP: _screen_lemp, C.F_PERM: _screen_perm,
     # man phu (mo qua "m|nginx" / "m|log", khong nam o menu chinh)
     "nginx": _screen_nginx, "log": _screen_log,
+    "wpadv": _screen_wpadv, "wpplug": _screen_wpplug,
 }
 
 
@@ -318,7 +332,8 @@ async def cb_nav(update, context, action, params):
         )
 
 
-_SUB_FEATURE = {"nginx": C.F_LEMP, "log": C.F_LEMP}
+_SUB_FEATURE = {"nginx": C.F_LEMP, "log": C.F_LEMP,
+                "wpadv": C.F_WP, "wpplug": C.F_WP}
 
 
 async def cb_open(update, context, feature, params):
@@ -406,6 +421,29 @@ async def cb_action(update, context, action, params):
                   "Bật các jail bổ sung (recidive / nginx-botsearch / nginx-limit-req) "
                   "và restart Fail2ban. Tiếp tục?"),
             parse_mode=HTML, reply_markup=menus.confirm_menu("f2bjails", back="m|fw"))
+
+    if action == "wp_plugins":
+        return await open_group(update, context, "wpplug", edit=True)
+    if action == "wp_install":
+        return (await q.edit_message_text(
+            title(E["wp"], "Cài WordPress tự động",
+                  "Trên bot, cách nhanh nhất là tạo site mới đã kèm WordPress:\n"
+                  "🌐 <b>Domain</b> → <b>Thêm domain</b> → chọn <b>📝 WordPress</b>.\n\n"
+                  "Cài WordPress vào site PHP <i>đã có sẵn</i> cần nhập tên site, user và "
+                  "email quản trị — chạy qua SSH: <code>hostvn</code> → "
+                  "<b>7. Quan ly WordPress</b> → <b>1</b>."),
+            parse_mode=HTML, reply_markup=menus.back_only("m|wp")))
+    if action in WP_OPS or action in ("wp_info", "wp_pass"):
+        pick = {"wp_info": "wpinfo2", "wp_pass": "wppass"}.get(action, f"wpop_{action}")
+        lbl = WP_LABEL.get(action, {"wp_info": "Thông tin site",
+                                    "wp_pass": "Đổi mật khẩu wp-admin"}.get(action, action))
+        return await _progress_op(
+            update, True, "⏳ <b>Đang tìm site WordPress…</b>",
+            asyncio.to_thread(hostvn.wp_domains),
+            lambda ds: (title(E["wp"], lbl,
+                              "Chọn website:" if ds else "Chưa có website nào dùng WordPress."),
+                        menus.picker_menu(pick, ds, E["wp"], "m|wp")),
+            est=4.0)
 
     # ----- Cache: cac buoc rieng -----
     if action in ("cache_mc", "cache_redis"):
@@ -819,6 +857,36 @@ async def cb_pick(update, context, action, params):
         return await start_flow(update, context, flow, "m|domain", emo,
                                 f"{head} — {target}", prompt)
 
+    if action == "wpinfo2":
+        return await _progress_op(
+            update, True, f"{E['wp']} <b>Đang đọc thông tin</b> {texts.esc(target)}…",
+            asyncio.to_thread(hostvn.wp_info, target),
+            lambda t: (title(E["wp"], target, pre(t)), menus.back_only("m|wp")), est=20.0)
+    if action == "wppass":
+        return await q.edit_message_text(
+            title(E["key"], "Đổi mật khẩu wp-admin",
+                  f"Đổi mật khẩu quản trị của <b>{texts.esc(target)}</b> cần nhập user và mật "
+                  f"khẩu mới — chạy qua SSH: <code>hostvn</code> → "
+                  f"<b>7. Quan ly WordPress</b> → <b>5</b>."),
+            parse_mode=HTML, reply_markup=menus.back_only("m|wp"))
+    if action.startswith("wpop_"):
+        key = action[5:]
+        if key not in WP_OPS:
+            return
+        if not can_write(chat):
+            return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                             reply_markup=menus.back_only("m|wp"))
+        _ctl, kind, on_lbl, off_lbl = WP_OPS[key]
+        lbl = WP_LABEL.get(key, key)
+        if kind == "toggle":
+            return await q.edit_message_text(
+                title(E["wp"], f"{lbl} — {target}", "Chọn thao tác:"),
+                parse_mode=HTML,
+                reply_markup=menus.wp_onoff_menu(key, target, on_lbl, off_lbl))
+        return await q.edit_message_text(
+            title(E["warn"], "Xác nhận", f"{lbl} cho <b>{texts.esc(target)}</b>?"),
+            parse_mode=HTML, reply_markup=menus.confirm_menu(f"wp_{key}", target, back="m|wp"))
+
     if action == "permchk":
         return await _progress_op(
             update, True, f"{E['perm']} <b>Đang kiểm tra quyền</b> {texts.esc(target)}…",
@@ -936,6 +1004,76 @@ async def cb_nd(update, context, typ, params):
     await _progress_op(update, True, base,
                        asyncio.to_thread(hostvn.create_domain, typ, domain),
                        render, est=est, stages=stages)
+
+
+
+# --------------------------------------------------------------------------- #
+# Bang thao tac WordPress (mirror menu 7 + submenu Advanced)
+#   controller : file trong menu/controller/wordpress
+#   kind       : "toggle" (chon 1=tat / 2=bat roi chon site)  |  "run" (chon site roi chay)
+#   on/off     : nhan hien thi cho 2 lua chon cua toggle
+# Thu tu prompt cua shell: chon THAO TAC truoc, chon WEBSITE sau -> seq "<n>\n<idx>"
+# --------------------------------------------------------------------------- #
+WP_OPS = {
+    "wpa_yoast":     ("yoast_seo", "toggle", "Bật Yoast config", "Tắt Yoast config"),
+    "wpa_rank":      ("rank_math_seo", "toggle", "Bật Rank Math config", "Tắt Rank Math config"),
+    "wpa_webp":      ("webp_express", "toggle", "Bật WebP Express", "Tắt WebP Express"),
+    "wpa_cacheplug": ("cache_plugins", "toggle", "Bật cache plugin config", "Tắt cache plugin config"),
+    "wpa_debug":     ("debug_mode", "toggle", "Bật Debug mode", "Tắt Debug mode"),
+    "wpa_maint":     ("maintenance_mode", "toggle", "Bật bảo trì", "Tắt bảo trì"),
+    "wpa_xmlrpc":    ("disable_xmlrpc", "toggle", "Chặn XMLRPC", "Bỏ chặn XMLRPC"),
+    "wpa_userapi":   ("disable_user_api", "toggle", "Chặn User API", "Bỏ chặn User API"),
+    "wpa_cron":      ("cron_job", "toggle", "Tối ưu WP-Cron", "Huỷ tối ưu WP-Cron"),
+    "wp_edit":       ("disable_edit_theme_plugins", "toggle",
+                      "Cho phép sửa theme/plugin", "Không cho phép sửa"),
+    "wp_lockdown":   ("wordpress_lockdown", "toggle", "Bật Lockdown", "Tắt Lockdown"),
+    "wp_htpasswd":   ("htpasswd_wp_admin", "toggle", "Bật bảo vệ wp-admin", "Tắt bảo vệ"),
+    "wp_core":       ("update_wordpress", "run", "", ""),
+    "wp_plugupd":    ("update_plugins", "run", "", ""),
+    "wp_plugoff":    ("deactivate_all_plugins", "run", "", ""),
+    "wp_optimize":   ("optimize_database", "run", "", ""),
+    "wpa_revision":  ("post_revision", "run", "", ""),
+    "wpa_cachekey":  ("cache_key", "run", "", ""),
+    "wp_moveconf":   ("move_wp_config", "run", "", ""),
+}
+WP_LABEL = {
+    "wpa_yoast": "Yoast SEO config", "wpa_rank": "Rank Math config",
+    "wpa_webp": "WebP Express", "wpa_cacheplug": "Nginx + plugin cache",
+    "wpa_debug": "Debug mode", "wpa_maint": "Chế độ bảo trì",
+    "wpa_xmlrpc": "XMLRPC", "wpa_userapi": "User API", "wpa_cron": "WP-Cron",
+    "wp_edit": "Sửa theme/plugin", "wp_lockdown": "WordPress Lockdown",
+    "wp_htpasswd": "Bảo vệ wp-admin", "wp_core": "Update WordPress Core",
+    "wp_plugupd": "Update plugins", "wp_plugoff": "Huỷ kích hoạt plugins",
+    "wp_optimize": "Tối ưu Database", "wpa_revision": "Xoá Post Revisions",
+    "wpa_cachekey": "Thêm cache key", "wp_moveconf": "Move wp-config",
+}
+
+# ---- WordPress (mien "wp") -------------------------------------------------- #
+async def cb_wp(update, context, key, params):
+    q = update.callback_query
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_WP):
+        return await q.edit_message_text(texts.DENY, parse_mode=HTML)
+    if not can_write(chat):
+        return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                         reply_markup=menus.back_only("m|wp"))
+    if key not in WP_OPS or len(params) < 2:
+        return
+    domain, choice = params[0], params[1]
+    ctl = WP_OPS[key][0]
+    lbl = WP_LABEL.get(key, key)
+    idx = await asyncio.to_thread(hostvn.wp_index, domain)
+    if not idx:
+        return await q.edit_message_text(
+            title(E["warn"], lbl, "Không tìm thấy site WordPress này."),
+            parse_mode=HTML, reply_markup=menus.back_only("m|wp"))
+    # shell hoi THAO TAC truoc roi moi chon WEBSITE
+    seq = f"{choice}\n{idx}"
+    return await _progress_op(
+        update, True, f"{E['wp']} <b>{texts.esc(lbl)}</b> — {texts.esc(domain)}…",
+        asyncio.to_thread(hostvn.wp_run, ctl, seq, 300),
+        lambda msg: (title(E["confirm"], lbl, pre(msg)), menus.back_only("m|wp")),
+        est=30.0, stages=[(60, f"{E['refresh']} <b>Đang áp dụng cấu hình</b>…")])
 
 
 # ---- PHP toggles (mien "pp") ------------------------------------------------ #
@@ -1289,6 +1427,20 @@ async def cb_yes(update, context, what, params):
             stages=[(40, f"{E['del']} <b>Xoá vHost &amp; PHP pool</b>…"),
                     (70, f"{E['del']} <b>Xoá user, thư mục &amp; database</b>…")],
         )
+    if what.startswith("wp_") and what[3:] in WP_OPS:
+        key = what[3:]
+        ctl = WP_OPS[key][0]
+        lbl = WP_LABEL.get(key, key)
+        idx = await asyncio.to_thread(hostvn.wp_index, param)
+        if not idx:
+            return await q.edit_message_text(
+                title(E["warn"], lbl, "Không tìm thấy site WordPress này."),
+                parse_mode=HTML, reply_markup=menus.back_only("m|wp"))
+        return await _progress_op(
+            update, True, f"{E['wp']} <b>{texts.esc(lbl)}</b> — {texts.esc(param)}…",
+            asyncio.to_thread(hostvn.wp_run, ctl, str(idx), 600),
+            lambda msg: (title(E["confirm"], lbl, pre(msg)), menus.back_only("m|wp")),
+            est=60.0, stages=[(50, f"{E['refresh']} <b>Đang xử lý</b>…")])
     if what == "permone":
         return await _progress_op(
             update, True, f"{E['perm']} <b>Đang phân quyền</b> {texts.esc(param)}…",
@@ -1571,5 +1723,5 @@ async def handle_flow(update, context, flow, text):
 CALLBACK_ROUTES = {
     "nav": cb_nav, "m": cb_open, "a": cb_action, "svc": cb_svc, "do": cb_do,
     "pick": cb_pick, "nd": cb_nd, "cf": cb_cf, "yes": cb_yes, "bk": cb_bk,
-    "dm": cb_dm, "ssl": cb_ssl, "cc": cb_cc, "lg": cb_lg, "pp": cb_pp,
+    "dm": cb_dm, "ssl": cb_ssl, "cc": cb_cc, "lg": cb_lg, "pp": cb_pp, "wp": cb_wp,
 }
