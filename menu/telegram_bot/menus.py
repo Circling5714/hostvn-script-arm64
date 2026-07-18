@@ -28,6 +28,10 @@ MAIN_MENU: list[list[tuple[str, str]]] = [
     [(C.F_SYS,    f"{C.E['sys']} Hệ thống"),    (C.F_VPS,  f"{C.E['vps']} VPS")],
     [(C.F_TOOL,   f"{C.E['tool']} Công cụ"),
      (C.F_PERM,   f"{C.E['perm']} Phân quyền")],
+    [(C.F_ACC,    f"{C.E['acc']} Thông tin Acc"),
+     (C.F_CRON,   f"{C.E['cron']} Cronjob")],
+    [(C.F_UPD,    f"{C.E['upd']} Update HostVN"),
+     (C.F_LANG,   f"{C.E['lang']} Change language")],
 ]
 
 
@@ -376,9 +380,67 @@ def vps_menu() -> InlineKeyboardMarkup:
 
 
 def tool_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '13. Cong cu' (9 muc) + loi vao '9. Admin Tool'."""
     return rows_menu([
-        [(f"🔗 Link Admin", "a|links")],
-        [(f"{C.E['sys']} File lớn trong /home", "a|largefiles")],
+        [("🔗 Link Admin", "a|links"),
+         (f"{C.E['sys']} File/thư mục lớn", "a|largefiles")],
+        [("📐 Dung lượng website", "a|tool_size"),
+         ("🖼️ Nén ảnh", "a|tool_img")],
+        [("📦 Giải nén file", "a|tool_unzip"),
+         ("🚀 Deploy website", "a|tool_deploy")],
+        [("🟩 Cài NodeJS", "a|tool_nodejs"),
+         ("🦠 Cài Anti Virus", "a|tool_av")],
+        [("☁️ Tải file Google Drive", "a|tool_ggdl")],
+        [(f"{C.E['admin']} Admin Tool", "m|admin")],
+    ])
+
+
+def admin_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '9. Admin Tool' (7 muc)."""
+    return rows_menu([
+        [("📊 Nginx Status (VTS)", "a|adm_vts")],
+        [(f"{C.E['key']} Đổi mật khẩu Admin Tool", "a|adm_pass"),
+         ("🔌 Đổi port Admin Tool", "a|adm_port")],
+        [(f"{C.E['refresh']} Update phpMyAdmin", "a|adm_pma")],
+        [(f"{C.E['refresh']} Update Opcache Panel", "a|adm_opc"),
+         (f"{C.E['refresh']} Update Redis Admin", "a|adm_redis")],
+        [(f"{C.E['refresh']} Update Memcached Admin", "a|adm_mc")],
+    ], back="m|tool")
+
+
+def acc_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '11. Xem thong tin tai khoan' (5 muc)."""
+    return rows_menu([
+        [("🛡️ Thông tin Admin Tool", "a|acc_admin")],
+        [(f"{C.E['db']} Thông tin phpMyAdmin", "a|acc_pma")],
+        [("🔌 SSH / SFTP Port", "a|acc_ssh")],
+        [(f"{C.E['domain']} Thông tin theo Website", "a|acc_site")],
+        [(f"{C.E['key']} Đổi mật khẩu SFTP website", "a|acc_sftp")],
+    ])
+
+
+def cron_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '12. Cronjob/Auto Backup' (6 muc)."""
+    return rows_menu([
+        [(f"{C.E['list']} Danh sách cronjob", "a|cron_list")],
+        [(f"{C.E['backup']} Auto backup tại VPS", "a|cron_local")],
+        [("☁️ Auto backup Google Drive", "a|cron_gg"),
+         ("☁️ Auto backup OneDrive", "a|cron_od")],
+        [("✏️ Cronjob tuỳ chỉnh", "a|cron_custom")],
+        [(f"{C.E['del']} Xoá cronjob", "a|cron_del")],
+    ])
+
+
+def upd_menu(has_new: bool, new: str = "") -> InlineKeyboardMarkup:
+    rows = [[(f"{C.E['refresh']} Cập nhật lên {new}", "up|run")]] if has_new else []
+    return rows_menu(rows or [[(f"{C.E['confirm']} Đang là bản mới nhất", "noop")]])
+
+
+def lang_menu(cur: str) -> InlineKeyboardMarkup:
+    mark = lambda c: " ✅" if cur == c else ""
+    return rows_menu([
+        [(f"🇻🇳 Tiếng Việt{mark('vi')}", "lg2|vi"),
+         (f"🇬🇧 English{mark('en')}", "lg2|en")],
     ])
 
 

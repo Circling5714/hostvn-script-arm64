@@ -42,11 +42,15 @@ F_SYS = "sys"
 F_VPS = "vps"
 F_TOOL = "tool"
 F_LEMP = "lemp"
-F_PERM = "perm"   # Phan quyen Chown/Chmod (menu 6)   # gom Nginx/PHP/Database/Log giong menu 4 cua shell
+F_PERM = "perm"
+F_ACC = "acc"     # Xem thong tin tai khoan (menu 11)
+F_CRON = "cron"   # Cronjob / Auto Backup (menu 12)
+F_UPD = "upd"     # Cap nhat HostVN Scripts (menu 14)
+F_LANG = "lang"   # Change language (menu 15)   # Phan quyen Chown/Chmod (menu 6)   # gom Nginx/PHP/Database/Log giong menu 4 cua shell
 
 # Nhom "chi xem" (BOT_MODE=notify van dung duoc).
 VIEW_FEATURES = {F_DOMAIN, F_DB, F_WP, F_SSL, F_FW, F_PHP, F_SVC, F_SYS, F_VPS,
-                 F_TOOL, F_LEMP, F_PERM}
+                 F_TOOL, F_LEMP, F_PERM, F_ACC, F_CRON, F_UPD, F_LANG}
 
 # --------------------------------------------------------------------------- #
 # Quy uoc emoji (moi nhan/tieu de mo dau bang emoji khop nghia)
@@ -55,7 +59,8 @@ E = {
     "home": "🏠", "menu": "📋",
     "domain": "🌐", "db": "🗄️", "wp": "📝", "ssl": "🔒", "cache": "⚡",
     "backup": "💾", "fw": "🛡️", "php": "🐘", "svc": "🔧", "sys": "🖥️",
-    "vps": "⚙️", "tool": "🛠️", "status": "📊", "lemp": "🧱", "log": "📜", "perm": "🔐",
+    "vps": "⚙️", "tool": "🛠️", "status": "📊", "lemp": "🧱", "log": "📜", "perm": "🔐", "acc": "👤",
+    "cron": "⏰", "upd": "🔄", "lang": "🌐", "admin": "🛡️",
     "cancel": "❌", "back": "⬅️", "confirm": "✅", "warn": "⚠️", "deny": "🚫",
     "add": "➕", "del": "🗑️", "info": "ℹ️", "refresh": "🔄", "list": "📋",
     "on": "🟢", "off": "🔴", "start": "▶️", "stop": "⏹", "reboot": "♻️",
