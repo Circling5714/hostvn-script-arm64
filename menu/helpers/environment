@@ -313,9 +313,15 @@ _svc_manual() {
             esac ;;
 
         cloudflared)
-            # cloudflared quan ly rieng qua token; o day chi start/stop tien trinh
+            # cloudflared chay bang tunnel token. Che do manual (khong systemd, vd Android):
+            # doc token tu file /etc/cloudflared/hostvn-token (do menu tunnel/setup luu) neu
+            # bien TUNNEL_TOKEN chua duoc set -> khoi dong 'cloudflared tunnel run --token'.
+            local _cftok="${TUNNEL_TOKEN:-$(cat /etc/cloudflared/hostvn-token 2>/dev/null)}"
             case "${action}" in
-                start|restart) pkill -x cloudflared 2>/dev/null; sleep 1; [ -n "${TUNNEL_TOKEN}" ] && setsid cloudflared tunnel run --token "${TUNNEL_TOKEN}" >/dev/null 2>&1 < /dev/null & ;;
+                start|restart)
+                    pkill -x cloudflared 2>/dev/null; sleep 1
+                    [ -n "${_cftok}" ] && setsid cloudflared tunnel run --token "${_cftok}" >/dev/null 2>&1 < /dev/null &
+                    ;;
                 stop)    pkill -x cloudflared ;;
                 is-active) pgrep -x cloudflared >/dev/null && echo active || { echo inactive; return 3; } ;;
             esac ;;
