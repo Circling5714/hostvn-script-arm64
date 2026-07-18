@@ -40,7 +40,11 @@ WRITE_ACTIONS = {"dom_add", "db_add", "cache_clear", "opcache_clear", "php_resta
                  "wp_moveconf", "wp_htpasswd", "wp_edit", "wp_lockdown",
                  "wpa_yoast", "wpa_rank", "wpa_webp", "wpa_cacheplug",
                  "wpa_cachekey", "wpa_debug", "wpa_maint", "wpa_xmlrpc",
-                 "wpa_userapi", "wpa_cron", "wpa_revision"}
+                 "wpa_userapi", "wpa_cron", "wpa_revision",
+                 "cron_del", "cron_local", "cron_gg", "cron_od", "cron_custom",
+                 "adm_pass", "adm_port", "adm_pma", "adm_opc", "adm_redis",
+                 "adm_mc", "tool_nodejs", "tool_img", "tool_unzip",
+                 "tool_deploy", "tool_av", "tool_ggdl", "acc_sftp"}
 
 
 # --------------------------------------------------------------------------- #
@@ -205,6 +209,39 @@ def _screen_wpplug():
     return title("🧩", "Plugins manager", "Chọn thao tác:"), menus.wp_plugins_menu()
 
 
+def _screen_acc():
+    return title(E["acc"], "Thông tin tài khoản", "Chọn mục cần xem:"), menus.acc_menu()
+
+
+def _screen_cron():
+    return title(E["cron"], "Cronjob / Auto Backup", "Chọn thao tác:"), menus.cron_menu()
+
+
+def _screen_admin():
+    port = hostvn.conf_val("admin_port")
+    return (title(E["admin"], "Admin Tool", f"Cổng quản trị: <b>{port}</b>"),
+            menus.admin_menu())
+
+
+def _screen_upd():
+    cur, new = hostvn.script_versions()
+    has_new = bool(new and new != "?" and new != cur)
+    body = f"Đang cài  : {cur}\nPhát hành : {new}"
+    hint = ("\n\n⚠️ Cập nhật sẽ thay toàn bộ thư mục <code>menu/</code> (gồm cả file bot). "
+            "Bot sẽ được khởi động lại sau khi xong." if has_new else "")
+    return (title(E["upd"], "Cập nhật HostVN Scripts", pre(body) + hint),
+            menus.upd_menu(has_new, new))
+
+
+def _screen_lang():
+    cur = hostvn.conf_val("lang") or "vi"
+    return (title(E["lang"], "Change language",
+                  f"Ngôn ngữ menu <b>shell</b> hiện tại: <b>{cur}</b>\n"
+                  f"<i>Chỉ đổi menu khi gõ lệnh <code>hostvn</code> qua SSH; "
+                  f"menu bot luôn tiếng Việt.</i>"),
+            menus.lang_menu(cur))
+
+
 def _screen_perm():
     return (title(E["perm"], "Phân quyền Chown/Chmod",
                   "Đặt lại quyền chuẩn: thư mục 755, file 644, chủ sở hữu là user của website."),
@@ -279,9 +316,12 @@ GROUP_SCREENS = {
     C.F_FW: _screen_fw, C.F_PHP: _screen_php, C.F_SVC: _screen_svc,
     C.F_SYS: _screen_sys, C.F_VPS: _screen_vps, C.F_TOOL: _screen_tool,
     C.F_LEMP: _screen_lemp, C.F_PERM: _screen_perm,
+    C.F_ACC: _screen_acc, C.F_CRON: _screen_cron,
+    C.F_UPD: _screen_upd, C.F_LANG: _screen_lang,
     # man phu (mo qua "m|nginx" / "m|log", khong nam o menu chinh)
     "nginx": _screen_nginx, "log": _screen_log,
     "wpadv": _screen_wpadv, "wpplug": _screen_wpplug,
+    "admin": _screen_admin,
 }
 
 
@@ -333,7 +373,7 @@ async def cb_nav(update, context, action, params):
 
 
 _SUB_FEATURE = {"nginx": C.F_LEMP, "log": C.F_LEMP,
-                "wpadv": C.F_WP, "wpplug": C.F_WP}
+                "wpadv": C.F_WP, "wpplug": C.F_WP, "admin": C.F_TOOL}
 
 
 async def cb_open(update, context, feature, params):
@@ -478,6 +518,33 @@ async def cb_action(update, context, action, params):
                   "Sẽ restart Redis/Memcached và xoá cache của tất cả website. Tiếp tục?"),
             parse_mode=HTML, reply_markup=menus.confirm_menu("clrall", back="m|cache"))
 
+    if action == "acc_site":
+        return await _progress_op(
+            update, True, "⏳ <b>Đang tải danh sách website…</b>",
+            asyncio.to_thread(hostvn.list_domains),
+            lambda ds: (title(E["acc"], "Thông tin theo Website", "Chọn website:"),
+                        menus.picker_menu("accsite", ds, E["domain"], "m|acc")),
+            est=4.0)
+    if action == "cron_del":
+        return await q.edit_message_text(
+            title(E["warn"], "Xoá cronjob",
+                  "Xoá <b>toàn bộ</b> crontab của root (gồm cả lịch auto-backup và "
+                  "lịch đồng bộ DB tmpfs). Tiếp tục?"),
+            parse_mode=HTML, reply_markup=menus.confirm_menu("cronclr", back="m|cron"))
+    if action in ("adm_pma", "adm_opc", "adm_redis", "adm_mc"):
+        ctl = {"adm_pma": "update_phpmyadmin", "adm_opc": "opcache_panel",
+               "adm_redis": "redis_panel", "adm_mc": "php_memcached_admin"}[action]
+        lbl = {"adm_pma": "phpMyAdmin", "adm_opc": "Opcache Panel",
+               "adm_redis": "Redis Admin", "adm_mc": "Memcached Admin"}[action]
+        return await q.edit_message_text(
+            title(E["warn"], f"Update {lbl}",
+                  f"Tải lại {lbl} từ nguồn chính thức và cài đè. Tiếp tục?"),
+            parse_mode=HTML,
+            reply_markup=menus.confirm_menu(f"admupd_{ctl}", lbl, back="m|admin"))
+    if action == "tool_nodejs":
+        return await q.edit_message_text(
+            title("🟩", "Cài NodeJS", "Cài Node.js + npm từ NodeSource. Tiếp tục?"),
+            parse_mode=HTML, reply_markup=menus.confirm_menu("nodejs", back="m|tool"))
     # ----- SSL: cac buoc rieng -----
     if action == "ssl_cfapi":
         return await _progress_op(
@@ -627,6 +694,28 @@ def _run_action(action: str, chat: int):
     if action == "bk_auto":
         return (title("⏰", "Auto backup", pre(hostvn.autobackup_info()) +
                       "\n<i>Đặt lịch chi tiết ở menu Cronjob trong shell.</i>"), "m|backup")
+    if action == "acc_admin":
+        return title(E["admin"], "Thông tin Admin Tool",
+                     pre(hostvn.acc_admin_info()) + "\n⚠️ <b>Bảo mật — xoá tin sau khi xem.</b>"), "m|acc"
+    if action == "acc_pma":
+        return title(E["db"], "Thông tin phpMyAdmin",
+                     pre(hostvn.acc_pma_info()) + "\n⚠️ <b>Bảo mật — xoá tin sau khi xem.</b>"), "m|acc"
+    if action == "acc_ssh":
+        return title("🔌", "SSH / SFTP", pre(hostvn.acc_ssh_info())), "m|acc"
+    if action == "cron_list":
+        return title(E["cron"], "Danh sách cronjob", pre(hostvn.cron_list())), "m|cron"
+    if action == "tool_size":
+        out = hostvn.sh("du -sh /home/*/*/public_html 2>/dev/null | sort -rh | head -12", 60)
+        return title("📐", "Dung lượng website", pre(out or "(trống)")), "m|tool"
+    if action == "adm_vts":
+        port = hostvn.conf_val("admin_port")
+        ip = hostvn.sh("bash -c 'source /var/hostvn/ipaddress; echo $IPADDRESS'", 10)
+        code = hostvn.sh(f"curl -s -o /dev/null -w '%{{http_code}}' -u admin:"
+                         f"{hostvn.conf_val('admin_pwd')} --max-time 8 "
+                         f"http://127.0.0.1:{port}/vts_status", 15)
+        return (title("📊", "Nginx Status (VTS)",
+                      pre(f"URL : http://{ip}:{port}/vts_status\nHTTP: {code}") +
+                      "\n<i>Mở bằng trình duyệt, đăng nhập admin.</i>"), "m|tool")
     if action == "fw_status":
         b = hostvn.fw_backend()
         yn = lambda v: "có" if v else "KHÔNG"
@@ -667,6 +756,38 @@ def _run_action(action: str, chat: int):
         return (title("🔌", "Mở port / Bật-Tắt firewall",
                       "Chạy qua SSH: <code>hostvn</code> → <b>5. Quan ly Firewall</b> "
                       "→ mục 1, 5, 6, 7."), "m|fw")
+    _SSH_ONLY = {
+        "tool_img":    ("🖼️", "Nén ảnh", "13. Cong cu", "1",
+                        "Cần chọn website và mức nén, xử lý hàng loạt ảnh."),
+        "tool_unzip":  ("📦", "Giải nén file", "13. Cong cu", "3",
+                        "Cần nhập đường dẫn file đã có sẵn trên máy chủ."),
+        "tool_deploy": ("🚀", "Deploy website", "13. Cong cu", "2",
+                        "Cần nhập nguồn mã và nhiều tuỳ chọn."),
+        "tool_av":     ("🦠", "Cài Anti Virus", "13. Cong cu", "6",
+                        "ImunifyAV chỉ hỗ trợ x86_64 — <b>không chạy trên ARM64</b>."),
+        "tool_ggdl":   ("☁️", "Tải file Google Drive", "13. Cong cu", "9",
+                        "Cần nhập link/ID file và thư mục đích."),
+        "adm_pass":    (E["key"], "Đổi mật khẩu Admin Tool", "9. Admin Tool", "5",
+                        "Cần nhập mật khẩu mới."),
+        "adm_port":    ("🔌", "Đổi port Admin Tool", "9. Admin Tool", "6",
+                        "Đổi port sẽ ảnh hưởng link truy cập đang dùng."),
+        "acc_sftp":    (E["key"], "Đổi mật khẩu SFTP", "11. Xem thong tin tai khoan", "5",
+                        "Đã có sẵn ở 🌐 Domain → Đổi mật khẩu SFTP (chạy được trên bot)."),
+        "cron_local":  (E["backup"], "Auto backup tại VPS", "12. Cronjob/Auto Backup", "2",
+                        "Cần chọn website, giờ chạy và số bản giữ lại."),
+        "cron_gg":     ("☁️", "Auto backup Google Drive", "12. Cronjob/Auto Backup", "3",
+                        "Cần chọn remote, website và lịch chạy."),
+        "cron_od":     ("☁️", "Auto backup OneDrive", "12. Cronjob/Auto Backup", "4",
+                        "Cần chọn remote, website và lịch chạy."),
+        "cron_custom": ("✏️", "Cronjob tuỳ chỉnh", "12. Cronjob/Auto Backup", "5",
+                        "Cần nhập biểu thức cron và lệnh — dễ sai nếu gõ qua chat."),
+    }
+    if action in _SSH_ONLY:
+        emo, lbl, menu, num, why = _SSH_ONLY[action]
+        back = ("m|acc" if action.startswith("acc_") else
+                "m|cron" if action.startswith("cron_") else "m|tool")
+        return (title(emo, lbl, f"{why}\n\nChạy qua SSH: <code>hostvn</code> → "
+                      f"<b>{menu}</b> → <b>{num}</b>."), back)
     if action == "ngx_test":
         return title(E["svc"], "Test cấu hình Nginx",
                      pre(hostvn.sh("nginx -t 2>&1", 30))), "m|nginx"
@@ -887,6 +1008,13 @@ async def cb_pick(update, context, action, params):
             title(E["warn"], "Xác nhận", f"{lbl} cho <b>{texts.esc(target)}</b>?"),
             parse_mode=HTML, reply_markup=menus.confirm_menu(f"wp_{key}", target, back="m|wp"))
 
+    if action == "accsite":
+        return await _progress_op(
+            update, True, f"{E['acc']} <b>Đang đọc</b> {texts.esc(target)}…",
+            asyncio.to_thread(hostvn.acc_site_info, target),
+            lambda t: (title(E["acc"], target, pre(t) +
+                             "\n⚠️ <b>Bảo mật — xoá tin sau khi xem.</b>"),
+                       menus.back_only("m|acc")), est=8.0)
     if action == "permchk":
         return await _progress_op(
             update, True, f"{E['perm']} <b>Đang kiểm tra quyền</b> {texts.esc(target)}…",
@@ -1047,6 +1175,41 @@ WP_LABEL = {
     "wp_optimize": "Tối ưu Database", "wpa_revision": "Xoá Post Revisions",
     "wpa_cachekey": "Thêm cache key", "wp_moveconf": "Move wp-config",
 }
+
+# ---- Update scripts (mien "up") / Language (mien "lg2") --------------------- #
+async def cb_up(update, context, action, params):
+    q = update.callback_query
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_UPD) or not can_write(chat):
+        return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                         reply_markup=menus.back_only("m|upd"))
+    if action != "run":
+        return
+    await _progress_op(
+        update, True, f"{E['upd']} <b>Đang cập nhật HostVN Scripts</b>…",
+        asyncio.to_thread(hostvn.run_update_scripts),
+        lambda out: (title(E["confirm"], "Cập nhật xong",
+                           pre(out) + "\n<i>Đang khởi động lại bot…</i>"),
+                     menus.back_only(C.CB_HOME)),
+        est=180.0,
+        stages=[(40, "📦 <b>Đang tải gói menu mới</b>…"),
+                (75, "🔧 <b>Đang áp dụng thay đổi</b>…")])
+    # menu/ vua bi thay (gom ca file bot) -> khoi dong lai de nap ban moi
+    await asyncio.to_thread(hostvn.svc, "restart", "hostvn-telegram-bot")
+
+
+async def cb_lg2(update, context, code, params):
+    q = update.callback_query
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_LANG) or not can_write(chat):
+        return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                         reply_markup=menus.back_only("m|lang"))
+    ok, msg = await asyncio.to_thread(hostvn.set_language, code)
+    text, kb = await asyncio.to_thread(_screen_lang)
+    await q.edit_message_text(
+        title(E["confirm"] if ok else E["warn"], "Change language", texts.esc(msg)) +
+        "\n\n" + text, parse_mode=HTML, reply_markup=kb)
+
 
 # ---- WordPress (mien "wp") -------------------------------------------------- #
 async def cb_wp(update, context, key, params):
@@ -1464,6 +1627,31 @@ async def cb_yes(update, context, what, params):
             asyncio.to_thread(hostvn.f2b_extra_jails),
             lambda msg: (title(E["confirm"], "Fail2ban jail", texts.esc(msg)),
                          menus.back_only("m|fw")), est=25.0)
+    if what == "cronclr":
+        return await _progress_op(
+            update, True, f"{E['cron']} <b>Đang xoá cronjob</b>…",
+            asyncio.to_thread(hostvn.cron_delete_all),
+            lambda msg: (title(E["confirm"], "Cronjob", texts.esc(msg) +
+                               "\n⚠️ Lịch đồng bộ DB tmpfs cũng bị xoá — cân nhắc tạo lại."),
+                         menus.back_only("m|cron")), est=8.0)
+    if what.startswith("admupd_"):
+        ctl = what[7:]
+        return await _progress_op(
+            update, True, f"{E['refresh']} <b>Đang cập nhật</b> {texts.esc(param)}…",
+            asyncio.to_thread(hostvn.run_ctl, "",
+                              f"/var/hostvn/menu/controller/admin/{ctl}", 600),
+            lambda out: (title(E["confirm"], param,
+                               pre(hostvn._ctl_reason(out, "Đã cập nhật."))),
+                         menus.back_only("m|admin")), est=90.0)
+    if what == "nodejs":
+        return await _progress_op(
+            update, True, "🟩 <b>Đang cài NodeJS</b>…",
+            asyncio.to_thread(hostvn.run_ctl, "",
+                              "/var/hostvn/menu/controller/tools/install_nodejs", 900),
+            lambda out: (title(E["confirm"], "NodeJS",
+                               pre(hostvn.sh("node -v 2>/dev/null; npm -v 2>/dev/null", 15)
+                                   or hostvn._ctl_reason(out, "Đã chạy."))),
+                         menus.back_only("m|tool")), est=180.0)
     if what == "logclr":
         return await _progress_op(
             update, True, f"{E['log']} <b>Đang xoá error log</b>…",
@@ -1723,5 +1911,5 @@ async def handle_flow(update, context, flow, text):
 CALLBACK_ROUTES = {
     "nav": cb_nav, "m": cb_open, "a": cb_action, "svc": cb_svc, "do": cb_do,
     "pick": cb_pick, "nd": cb_nd, "cf": cb_cf, "yes": cb_yes, "bk": cb_bk,
-    "dm": cb_dm, "ssl": cb_ssl, "cc": cb_cc, "lg": cb_lg, "pp": cb_pp, "wp": cb_wp,
+    "dm": cb_dm, "ssl": cb_ssl, "cc": cb_cc, "lg": cb_lg, "pp": cb_pp, "wp": cb_wp, "up": cb_up, "lg2": cb_lg2,
 }

@@ -891,6 +891,74 @@ def wp_run(ctl: str, seq: str, timeout: int = 300) -> str:
     return _ctl_reason(run_ctl(seq, f"{WPCTL}/{ctl}", timeout), "Đã chạy xong.")
 
 
+def acc_admin_info() -> str:
+    port = conf_val("admin_port"); pwd = conf_val("admin_pwd")
+    ip = sh("bash -c 'source /var/hostvn/ipaddress; echo $IPADDRESS'", 10)
+    return (f"URL  : http://{ip}:{port}\nUser : admin\nPass : {pwd}")
+
+
+def acc_pma_info() -> str:
+    port = conf_val("admin_port"); pwd = conf_val("mysql_pwd")
+    ip = sh("bash -c 'source /var/hostvn/ipaddress; echo $IPADDRESS'", 10)
+    return (f"URL  : http://{ip}:{port}/phpmyadmin\nUser : admin\nPass : {pwd}")
+
+
+def acc_ssh_info() -> str:
+    p_ = conf_val("ssh_port") or "22"
+    listen = sh("ss -ltn 2>/dev/null | awk '{print $4}' | grep -oE '[0-9]+$' | sort -un | tr '\n' ' '", 15)
+    ip = sh("bash -c 'source /var/hostvn/ipaddress; echo $IPADDRESS'", 10)
+    return f"SSH/SFTP host: {ip}\nSSH/SFTP port: {p_}\n\nCổng đang lắng nghe: {listen}"
+
+
+def acc_site_info(domain: str) -> str:
+    uc = read_user_conf(domain)
+    if not uc:
+        return "Không có thông tin cho website này."
+    ip = sh("bash -c 'source /var/hostvn/ipaddress; echo $IPADDRESS'", 10)
+    keys = [("username", "SFTP user"), ("user_pass", "SFTP pass"),
+            ("db_name", "DB name"), ("db_user", "DB user"),
+            ("db_password", "DB pass"), ("php_version", "PHP"),
+            ("public_html", "Docroot")]
+    lines = [f"{lbl:<10}: {uc.get(k, '-')}" for k, lbl in keys]
+    return f"SFTP host : {ip}\nSFTP port : {conf_val('ssh_port') or '22'}\n" + "\n".join(lines)
+
+
+def cron_list() -> str:
+    out = sh("crontab -l 2>/dev/null", 15)
+    files = sh("ls /etc/cron.d 2>/dev/null | tr '\n' ' '", 10)
+    return (f"crontab -l:\n{out or '(trống)'}\n\n/etc/cron.d: {files or '(trống)'}")
+
+
+def cron_delete_all() -> str:
+    sh("crontab -r 2>/dev/null; echo done", 20, merge=True)
+    return "Đã xoá toàn bộ crontab của root."
+
+
+def script_versions() -> tuple[str, str]:
+    """(ban dang cai, ban tren server phat hanh)."""
+    cur = conf_val("script_version") or "?"
+    link = sh("grep -m1 '^UPDATE_LINK=' /var/hostvn/menu/helpers/variable_common "
+              "| cut -d'\"' -f2", 10)
+    new = sh(f"curl -s --max-time 15 {link}/version | grep '^script_version=' | cut -d= -f2", 25)
+    return cur, (new.strip() or "?")
+
+
+def run_update_scripts() -> str:
+    out = sh("cd /var/hostvn && curl -so update \"$(grep -m1 '^UPDATE_LINK=' "
+             "menu/helpers/variable_common | cut -d'\"' -f2)/update\" && "
+             "dos2unix update >/dev/null 2>&1; chmod +x update && bash update; rm -f update",
+             900, merge=True)
+    tail = "\n".join(out.strip().splitlines()[-5:])
+    return tail or "Đã chạy update."
+
+
+def set_language(code: str) -> tuple[bool, str]:
+    if code not in ("vi", "en"):
+        return False, "Mã ngôn ngữ không hợp lệ."
+    sh(f"sed -i '/^lang=/d' {C.FILE_INFO}; echo 'lang={code}' >> {C.FILE_INFO}", 15)
+    return conf_val("lang") == code, f"Đã chuyển ngôn ngữ menu shell sang {code}."
+
+
 def php_versions() -> list[str]:
     out = sh("ls /etc/php 2>/dev/null", 10)
     return sorted(x for x in out.split() if x[:1].isdigit())
