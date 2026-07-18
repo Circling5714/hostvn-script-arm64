@@ -112,8 +112,11 @@ BOT_MODE="${BOT_MODE}"
 EOF
     chmod 600 "${CONF}"
 
-    # Tao systemd service
-    cat > "${SERVICE}" <<EOF
+    chmod +x "${BOT_SCRIPT}"
+    # Chi tao systemd unit khi CO systemd. Che do manual (Android/chroot): _svc chay bot.sh
+    # truc tiep bang setsid (handler 'hostvn-telegram-bot' trong menu/helpers/environment).
+    if [ "${HOSTVN_INIT}" = "systemd" ]; then
+        cat > "${SERVICE}" <<EOF
 [Unit]
 Description=HOSTVN Telegram Control Bot
 After=network-online.target
@@ -128,9 +131,8 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    chmod +x "${BOT_SCRIPT}"
-    _svc daemon-reload
+        _svc daemon-reload
+    fi
     _svc enable "${SERVICE_NAME}" >/dev/null 2>&1
     _svc restart "${SERVICE_NAME}"
     sleep 2
@@ -139,7 +141,11 @@ EOF
     if _svc_active "${SERVICE_NAME}"; then
         printf "%s\n" "${GREEN}Bot da chay o che do '${BOT_MODE}'. Kiem tra Telegram, go /help.${NC}"
     else
-        printf "%s\n" "${RED}Bot khong khoi dong duoc. Xem log: journalctl -u ${SERVICE_NAME}${NC}"
+        if [ "${HOSTVN_INIT}" = "systemd" ]; then
+            printf "%s\n" "${RED}Bot khong khoi dong duoc. Xem log: journalctl -u ${SERVICE_NAME}${NC}"
+        else
+            printf "%s\n" "${RED}Bot khong khoi dong duoc. Chay thu: bash ${BOT_SCRIPT}${NC}"
+        fi
     fi
 }
 

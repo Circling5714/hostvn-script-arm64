@@ -69,7 +69,7 @@ if _svc_active fail2ban; then
     printf "%s\n" "${GREEN}Da bat cac jail tang cuong. Danh sach jail dang chay:${NC}"
     fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*Jail list:\s*//'
 else
-    printf "%s\n" "${RED}Fail2ban khong khoi dong duoc sau khi them jail. Kiem tra: journalctl -u fail2ban${NC}"
+    printf "%s\n" "${RED}Fail2ban khong khoi dong duoc sau khi them jail. Xem loi: fail2ban-client -x start${NC}"
 fi
 echo
 read -r -p "Nhan Enter de quay lai..." _

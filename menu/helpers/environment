@@ -326,6 +326,18 @@ _svc_manual() {
                 is-active) pgrep -x cloudflared >/dev/null && echo active || { echo inactive; return 3; } ;;
             esac ;;
 
+        hostvn-telegram-bot)
+            # Bot Telegram: che do manual chay truc tiep bot.sh (khong co systemd unit)
+            local _botsh=/var/hostvn/menu/telegram_bot/bot.sh
+            case "${action}" in
+                start|restart)
+                    pkill -f "bash ${_botsh}" 2>/dev/null; sleep 1
+                    [ -f "${_botsh}" ] && setsid /bin/bash "${_botsh}" >/dev/null 2>&1 < /dev/null &
+                    ;;
+                stop)    pkill -f "bash ${_botsh}" 2>/dev/null ;;
+                is-active) pgrep -f "bash ${_botsh}" >/dev/null && echo active || { echo inactive; return 3; } ;;
+            esac ;;
+
         supervisor|supervisord)
             case "${action}" in
                 start|restart) pkill -x supervisord 2>/dev/null; sleep 1; supervisord -c /etc/supervisor/supervisord.conf 2>/dev/null ;;

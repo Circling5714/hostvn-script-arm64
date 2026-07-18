@@ -3376,6 +3376,24 @@ maxretry = 2
 bantime  = 86400
 END
 
+    # Android/container KHONG co netfilter (iptables): fail2ban ban local vo dung, va thieu
+    # /var/log/auth.log khien fail2ban ABORT ("not found any log file for sshd jail").
+    # (1) tao san cac log file jail tham chieu; (2) doi moi banaction iptables* -> NO-OP
+    # (ban that se dong bo len Cloudflare WAF qua menu Firewall). VPS binh thuong giu iptables.
+    if [ "${HOSTVN_FIREWALL}" != "yes" ]; then
+        mkdir -p /var/log /var/log/nginx /run/fail2ban
+        touch /var/log/auth.log /var/log/nginx/error.log /var/log/nginx/access.log
+        cat > /etc/fail2ban/action.d/hostvn-noop.conf <<'EOF'
+[Definition]
+actionstart =
+actionstop =
+actioncheck =
+actionban =
+actionunban =
+EOF
+        sed -i 's/iptables-[a-z-]*/hostvn-noop/g' /etc/fail2ban/jail.local /etc/fail2ban/jail.d/*.local 2>/dev/null
+    fi
+
     _svc start fail2ban
     _svc enable fail2ban
 }
@@ -3856,6 +3874,25 @@ printf "========================================================================
 # Trong container/chroot (Android, LXC...): khong reboot -> phai khoi dong
 # dich vu tuong minh (khong co systemd autostart).
 if [ "${HOSTVN_CONTAINER}" = "yes" ]; then
+    # Hook AUTO-START: Linux Deploy chay /etc/rc.local moi khi start container -> dich vu
+    # tu len lai sau khi dien thoai/container reboot (khong co systemd autostart). Doc danh
+    # sach service da 'enable' o /var/hostvn/autostart va khoi dong theo thu tu an toan.
+    cat > /etc/rc.local <<'EOrclocal'
+#!/bin/bash
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+[ -f /var/hostvn/menu/helpers/environment ] && source /var/hostvn/menu/helpers/environment 2>/dev/null
+AD=/var/hostvn/autostart
+[ -d "$AD" ] || exit 0
+order="mariadb"
+for p in "$AD"/php*-fpm; do [ -e "$p" ] && order="$order $(basename "$p")"; done
+order="$order redis-server memcached nginx cloudflared fail2ban cron supervisor hostvn-telegram-bot"
+for svc in $order; do
+    [ -f "$AD/$svc" ] && { _svc start "$svc" >/dev/null 2>&1; sync; sleep 1; }
+done
+exit 0
+EOrclocal
+    chmod +x /etc/rc.local
+
     printf "%s\n" "Moi truong container - khoi dong dich vu (tuan tu, nhe nhang)..."
     # Khoi dong TUNG dich vu mot, co 'sync' + nghi giua cac buoc de tranh burst I/O
     # dong thoi (tren Android burst nay lam sap vold -> reboot). MariaDB chay tren

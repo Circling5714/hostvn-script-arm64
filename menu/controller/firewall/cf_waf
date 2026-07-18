@@ -155,7 +155,7 @@ EOF
         printf "%s\n" "${GREEN}Da bat dong bo Fail2ban -> Cloudflare WAF (zone: ${zone_id}).${NC}"
         printf "%s\n" "${GREEN}Tu gio moi IP bi fail2ban ban se bi chan tren Cloudflare.${NC}"
     else
-        printf "%s\n" "${RED}Fail2ban khong khoi dong duoc. Kiem tra: journalctl -u fail2ban${NC}"
+        printf "%s\n" "${RED}Fail2ban khong khoi dong duoc. Xem loi: fail2ban-client -x start${NC}"
     fi
 }
 
