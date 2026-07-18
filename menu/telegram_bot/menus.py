@@ -277,9 +277,16 @@ def remotes_menu(remotes: list[str], back: str = "m|backup") -> InlineKeyboardMa
 
 
 def fw_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '5. Quan ly Firewall' (10 muc) cua shell."""
     return rows_menu([
-        [(f"{C.E['status']} Thống kê Fail2ban", "a|f2b_stats")],
+        [(f"{C.E['list']} Trạng thái firewall", "a|fw_status")],
+        [(f"{C.E['status']} Thống kê Fail2ban", "a|f2b_stats"),
+         ("🚫 IP đang bị ban", "a|fw_banned")],
+        [("⛔ Ban IP", "a|fw_ban"), ("🔓 Unban IP", "a|fw_unban")],
+        [("🧱 Bật thêm jail", "a|fw_jails")],
         [(f"{C.E['refresh']} Restart Fail2ban", "do|fail2ban|restart")],
+        [("☁️ Cloudflare WAF", "a|fw_cfwaf")],
+        [("🔌 Mở port / Bật-Tắt firewall", "a|fw_port")],
     ])
 
 

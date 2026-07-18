@@ -746,6 +746,77 @@ def pkg_service(name: str, install: bool) -> tuple[bool, str]:
     return ok, ("Đã gỡ bỏ." if ok else "Gỡ bỏ chưa hoàn tất.")
 
 
+# --------------------------------------------------------------------------- #
+# Firewall (mirror menu "5. Quan ly Firewall")
+# Luu y moi truong Android/chroot: KHONG co iptables/ufw, fail2ban chay banaction
+# 'hostvn-noop' -> chi PHAT HIEN chu khong chan. Chan that phai lam o Cloudflare WAF.
+# --------------------------------------------------------------------------- #
+FWCTL = "/var/hostvn/menu/controller/firewall"
+CF_WAF_CONF = "/var/hostvn/.cf_waf.conf"
+
+
+def fw_backend() -> dict:
+    """Xac dinh moi truong firewall thuc te."""
+    have = {c: bool(sh(f"command -v {c}", 8)) for c in ("iptables", "ufw", "nft")}
+    noop = Path("/etc/fail2ban/action.d/hostvn-noop.conf").exists()
+    ban = sh("grep -m1 '^banaction' /etc/fail2ban/jail.local 2>/dev/null | cut -d= -f2", 10).strip()
+    return {
+        "iptables": have["iptables"], "ufw": have["ufw"], "nft": have["nft"],
+        "noop": noop, "banaction": ban or "?",
+        "cf_waf": Path(CF_WAF_CONF).exists(),
+        "tunnel": is_tunnel_mode(),
+    }
+
+
+def f2b_jails() -> list[str]:
+    out = sh("fail2ban-client status 2>/dev/null | grep 'Jail list' | sed 's/.*://'", 15)
+    return [x.strip() for x in out.split(",") if x.strip()]
+
+
+def f2b_banned() -> str:
+    """Danh sach IP dang bi ban theo tung jail."""
+    rows = []
+    for j in f2b_jails():
+        ips = sh(f"fail2ban-client status {shlex.quote(j)} 2>/dev/null | "
+                 f"grep -A1 'Banned IP list' | tail -1 | sed 's/.*://'", 15).strip()
+        cnt = sh(f"fail2ban-client status {shlex.quote(j)} 2>/dev/null | "
+                 f"grep 'Currently banned' | grep -oE '[0-9]+$'", 10).strip()
+        rows.append(f"{j}: {cnt or '0'} IP" + (f"\n   {ips}" if ips else ""))
+    return "\n".join(rows) or "(fail2ban chưa chạy)"
+
+
+def f2b_unban(ip: str) -> tuple[bool, str]:
+    if not re.match(r"^[0-9a-fA-F:.]+$", ip or ""):
+        return False, "IP không hợp lệ."
+    out = sh(f"fail2ban-client unban {shlex.quote(ip)} 2>&1", 30, merge=True)
+    return True, (out.strip()[:200] or f"Đã gỡ ban {ip}.")
+
+
+def f2b_ban(ip: str, jail: str = "sshd") -> tuple[bool, str]:
+    if not re.match(r"^[0-9a-fA-F:.]+$", ip or ""):
+        return False, "IP không hợp lệ."
+    out = sh(f"fail2ban-client set {shlex.quote(jail)} banip {shlex.quote(ip)} 2>&1", 30, merge=True)
+    return True, (out.strip()[:200] or f"Đã ban {ip} trong jail {jail}.")
+
+
+def f2b_extra_jails() -> str:
+    out = run_ctl("", f"{FWCTL}/f2b_extra_jails", 180)
+    return _ctl_reason(out, "Đã chạy bật thêm jail.")
+
+
+def cf_waf_status() -> str:
+    p = Path(CF_WAF_CONF)
+    if not p.exists():
+        return "Chưa cấu hình đồng bộ Cloudflare WAF."
+    zone = conf_val("CF_WAF_ZONE", CF_WAF_CONF)      # conf_val da bo nhay bao quanh
+    tok = conf_val("CF_WAF_TOKEN", CF_WAF_CONF)
+    cron = sh("crontab -l 2>/dev/null | grep -c cf_waf", 10).strip()
+    return (f"Đã cấu hình.\n"
+            f"Zone ID : {(zone[:12] + '…') if zone else '(trống)'}\n"
+            f"Token   : {'(có)' if tok else '(trống)'}\n"
+            f"Cron đồng bộ: {cron or '0'} mục")
+
+
 def php_versions() -> list[str]:
     out = sh("ls /etc/php 2>/dev/null", 10)
     return sorted(x for x in out.split() if x[:1].isdigit())
