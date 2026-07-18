@@ -290,11 +290,31 @@ _svc_manual() {
 
         memcached)
             # KHONG dung '-d' (daemonize cua memcached khong song trong container/chroot -
-            # tien trinh thoat sau khi fork). Chay foreground + setsid de nen (nhu cac service khac).
+            # tien trinh thoat sau khi fork). Chay foreground + setsid de nen.
+            #
+            # Tren Android: "paranoid networking" chi cho tien trinh thuoc gid 3003
+            # (aid_inet) tao socket mang. memcached bind SAU khi ha quyen (-u nobody) va
+            # setgroups() xoa het group phu, nen bind TCP luon bao:
+            #   "failed to listen on one of interface(s) 127.0.0.1: Operation not permitted"
+            # (nginx/mariadb khong dinh vi chung bind TU LUC con la root).
+            # Them nobody vao aid_inet KHONG cuu duoc (group phu bi xoa khi ha quyen).
+            # => Tren Android/container dung UNIX SOCKET, khong dung TCP.
+            _MC_SOCK="/tmp/memcached.sock"
+            _mc_start() {
+                [ -x /usr/bin/memcached ] || return 0
+                if [ "${HOSTVN_ANDROID}" = "yes" ] || [ "${HOSTVN_CONTAINER}" = "yes" ]; then
+                    rm -f "${_MC_SOCK}" 2>/dev/null
+                    setsid /usr/bin/memcached -u nobody -m 64 -s "${_MC_SOCK}" -a 0777 \
+                        </dev/null >/dev/null 2>&1 &
+                else
+                    setsid /usr/bin/memcached -u nobody -m 64 -l 127.0.0.1 \
+                        </dev/null >/dev/null 2>&1 &
+                fi
+            }
             case "${action}" in
-                start)   [ -x /usr/bin/memcached ] && setsid /usr/bin/memcached -u nobody -m 64 -l 127.0.0.1 </dev/null >/dev/null 2>&1 & ;;
+                start)   _mc_start ;;
                 stop)    pkill -x memcached ;;
-                restart) pkill -x memcached 2>/dev/null; sleep 1; setsid /usr/bin/memcached -u nobody -m 64 -l 127.0.0.1 </dev/null >/dev/null 2>&1 & ;;
+                restart) pkill -x memcached 2>/dev/null; sleep 1; _mc_start ;;
                 is-active) pgrep -x memcached >/dev/null && echo active || { echo inactive; return 3; } ;;
             esac ;;
 
