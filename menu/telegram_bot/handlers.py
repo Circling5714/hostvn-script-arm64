@@ -190,6 +190,32 @@ def _screen_php():
     return title(E["php"], f"PHP {hostvn.php_version()}", ""), menus.php_menu()
 
 
+def _screen_lemp():
+    pv = hostvn.php_version()
+    st = hostvn.services_status(["nginx", "mariadb", f"php{pv}-fpm"])
+    ic = lambda n: E["on"] if st.get(n) == "active" else E["off"]
+    body = (f"Nginx {ic('nginx')}  ·  MariaDB {ic('mariadb')}  ·  "
+            f"PHP {pv} {ic(f'php{pv}-fpm')}")
+    return (title(E["lemp"], "Quản lý LEMP", body + "\nChọn thành phần:"),
+            menus.lemp_menu())
+
+
+def _screen_nginx():
+    v = hostvn.sh("nginx -v 2>&1 | head -1", 10)
+    ok = hostvn.sh("nginx -t 2>&1 | tail -1", 20)
+    return (title(E["svc"], "Nginx", pre(f"{v}\n{ok}")), menus.nginx_menu())
+
+
+def _screen_log():
+    def sz(p):
+        s = hostvn.sh(f"du -h {p} 2>/dev/null | cut -f1", 10)
+        return s or "—"
+    body = (f"nginx : {sz('/var/log/nginx/error.log')}\n"
+            f"php   : {sz('/var/log/php-fpm/error.log')}\n"
+            f"mysql : {sz('/var/log/mysql/mysqld.log')}")
+    return title(E["log"], "Error Log", pre(body)), menus.log_menu()
+
+
 def _screen_svc():
     pv = hostvn.php_version()
     names = ["nginx", "mariadb", f"php{pv}-fpm", "redis", "memcached",
@@ -231,6 +257,9 @@ GROUP_SCREENS = {
     C.F_SSL: _screen_ssl, C.F_CACHE: _screen_cache, C.F_BACKUP: _screen_backup,
     C.F_FW: _screen_fw, C.F_PHP: _screen_php, C.F_SVC: _screen_svc,
     C.F_SYS: _screen_sys, C.F_VPS: _screen_vps, C.F_TOOL: _screen_tool,
+    C.F_LEMP: _screen_lemp,
+    # man phu (mo qua "m|nginx" / "m|log", khong nam o menu chinh)
+    "nginx": _screen_nginx, "log": _screen_log,
 }
 
 
@@ -281,8 +310,11 @@ async def cb_nav(update, context, action, params):
         )
 
 
+_SUB_FEATURE = {"nginx": C.F_LEMP, "log": C.F_LEMP}
+
+
 async def cb_open(update, context, feature, params):
-    if not has_feature(update.effective_chat.id, feature):
+    if not has_feature(update.effective_chat.id, _SUB_FEATURE.get(feature, feature)):
         return await update.callback_query.edit_message_text(texts.DENY, parse_mode=HTML)
     await open_group(update, context, feature, edit=True)
 
@@ -526,6 +558,50 @@ def _run_action(action: str, chat: int):
     if action == "bk_auto":
         return (title("⏰", "Auto backup", pre(hostvn.autobackup_info()) +
                       "\n<i>Đặt lịch chi tiết ở menu Cronjob trong shell.</i>"), "m|backup")
+    if action == "ngx_test":
+        return title(E["svc"], "Test cấu hình Nginx",
+                     pre(hostvn.sh("nginx -t 2>&1", 30))), "m|nginx"
+    if action in ("ngx_update", "ngx_rebuild"):
+        what = "Update" if action == "ngx_update" else "Rebuild"
+        return (title(E["warn"], f"{what} Nginx",
+                      "Thao tác này <b>biên dịch Nginx từ mã nguồn</b> (kèm các module). "
+                      "Trên điện thoại ARM việc này mất ~20 phút, ngốn RAM/CPU và "
+                      "từng là nguyên nhân gây <b>reboot máy</b>.\n\n"
+                      "Chỉ nên chạy trực tiếp qua SSH để theo dõi được tiến trình:\n"
+                      "<code>hostvn</code> → <b>4. Quan ly LEMP</b> → <b>1. Nginx</b>."), "m|nginx")
+    if action == "php_params":
+        pv = hostvn.php_version()
+        cur = hostvn.sh(f"php{pv} -i 2>/dev/null | grep -iE "
+                        f"'^memory_limit|^upload_max|^post_max|^max_execution|^max_input' | head -6", 15)
+        return (title(E["php"], "Cấu hình tham số PHP", pre(cur) +
+                      "\n<i>Sửa giá trị cần chọn nhiều tham số một lúc — chạy qua SSH: "
+                      "<code>hostvn</code> → 4 → 2 → 2.</i>"), "m|php")
+    if action in ("php_default", "php_second", "php_ioncube"):
+        lbl = {"php_default": "Đổi phiên bản PHP mặc định",
+               "php_second": "Cài/đổi PHP thứ hai",
+               "php_ioncube": "Cài ionCube Loader"}[action]
+        return (title(E["php"], lbl,
+                      "Thao tác này cài/đổi gói PHP toàn hệ thống (apt + rebuild pool), "
+                      "ảnh hưởng mọi website nên <b>chưa đưa lên bot</b>.\n\n"
+                      "Chạy qua SSH: <code>hostvn</code> → <b>4. Quan ly LEMP</b> → "
+                      "<b>2. PHP</b>."), "m|php")
+    if action == "db_pass":
+        return (title(E["key"], "Đổi mật khẩu MySQL user",
+                      "Đổi mật khẩu DB sẽ làm site lỗi nếu file cấu hình (wp-config.php…) "
+                      "không sửa khớp.\n\nChạy qua SSH: <code>hostvn</code> → "
+                      "<b>4. Quan ly LEMP</b> → <b>3. Database</b> → <b>3</b>."), "m|db")
+    if action == "db_import":
+        return (title("📥", "Import database",
+                      "Import cần file .sql/.sql.gz nằm sẵn trên máy chủ — không gửi qua chat "
+                      "được.\n\nTải file lên (SFTP) rồi chạy: <code>hostvn</code> → "
+                      "<b>4. Quan ly LEMP</b> → <b>3. Database</b> → <b>6</b>."), "m|db")
+    if action == "db_remote":
+        bind = hostvn.sh("grep -rhE '^bind-address' /etc/mysql/ 2>/dev/null | head -2", 15)
+        port = hostvn.sh("ss -ltn 2>/dev/null | grep -c ':3306'", 10)
+        return (title("🌐", "Remote MySQL", pre(f"{bind or '(không thấy bind-address)'}\n"
+                      f"cổng 3306 đang lắng nghe: {port}") +
+                      "\n<i>Bật/tắt truy cập từ xa cần khai báo IP nguồn — chạy qua SSH: "
+                      "<code>hostvn</code> → 4 → 3 → 7.</i>"), "m|db")
     if action == "cache_status":
         return title(E["cache"], "Trạng thái cache", pre(hostvn.cache_status())), "m|cache"
     if action == "opcache_bl":
@@ -777,6 +853,119 @@ async def cb_nd(update, context, typ, params):
                        render, est=est, stages=stages)
 
 
+# ---- PHP toggles (mien "pp") ------------------------------------------------ #
+# Cac controller nay chi hoi y/n roi ghi vao 00-hostvn-custom.ini + restart php-fpm.
+_PHP_TOGGLES = {
+    "basedir":  ("open_basedir", "Open Basedir", "open_basedir"),
+    "urlfopen": ("allow_url_fopen", "allow_url_fopen", "allow_url_fopen"),
+    "procopen": ("proc_close", "proc_open / proc_close", "disable_functions"),
+}
+
+
+def _php_ini_state(needle: str) -> str:
+    pv = hostvn.php_version()
+    ini = f"/etc/php/{pv}/fpm/conf.d/00-hostvn-custom.ini"
+    cur = hostvn.sh(f"grep -iE '{needle}' {ini} 2>/dev/null | head -3", 10)
+    return cur or "(chưa cấu hình trong 00-hostvn-custom.ini)"
+
+
+async def cb_pp(update, context, action, params):
+    q = update.callback_query
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_PHP) and not has_feature(chat, C.F_LEMP):
+        return await q.edit_message_text(texts.DENY, parse_mode=HTML)
+    if action not in _PHP_TOGGLES:
+        return
+    ctl, label, needle = _PHP_TOGGLES[action]
+
+    if params and params[0] in ("y", "n"):        # pp|<key>|y|n -> thuc thi
+        if not can_write(chat):
+            return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                             reply_markup=menus.back_only("m|php"))
+        ans = params[0]
+        return await _progress_op(
+            update, True,
+            f"{E['php']} <b>Đang {'bật' if ans == 'y' else 'tắt'} {texts.esc(label)}</b>…",
+            asyncio.to_thread(hostvn.run_ctl, ans,
+                              f"/var/hostvn/menu/controller/php/{ctl}", 180),
+            lambda _out: (title(E["confirm"], label,
+                                pre(_php_ini_state(needle))), menus.back_only("m|php")),
+            est=25.0)
+
+    # Man hinh trang thai + 2 nut bat/tat
+    return await _progress_op(
+        update, True, f"⏳ <b>Đang đọc cấu hình {texts.esc(label)}…</b>",
+        asyncio.to_thread(_php_ini_state, needle),
+        lambda cur: (title(E["php"], label, pre(cur) + "\nChọn thao tác:"),
+                     menus.rows_menu([[(f"{E['on']} Bật", f"pp|{action}|y"),
+                                       (f"{E['off']} Tắt", f"pp|{action}|n")]], back="m|php")),
+        est=4.0)
+
+
+# ---- Log (mien "lg") -------------------------------------------------------- #
+_LOG_FILES = {
+    "nginx": ("/var/log/nginx/error.log", "Nginx error log"),
+    "php":   ("/var/log/php-fpm/error.log", "PHP error log"),
+    "mysql": ("/var/log/mysql/mysqld.log", "MariaDB error log"),
+}
+
+
+def _tail_log(path: str) -> str:
+    if not Path(path).exists():
+        return "(không có file log)"
+    return hostvn.sh(f"tail -n 20 {path}", 20) or "(log trống)"
+
+
+def _site_logs() -> str:
+    out = []
+    for d in hostvn.list_domains():
+        dr = hostvn.docroot(d)
+        if not dr:
+            continue
+        logf = str(Path(dr).parent / "logs" / "error.log")
+        if Path(logf).exists():
+            body = hostvn.sh(f"tail -n 8 {logf}", 15) or "(trống)"
+            out.append(f"● {d}\n{body}")
+    return "\n\n".join(out) or "(không website nào có error log)"
+
+
+def _clear_logs() -> str:
+    hostvn.sh("rm -f /var/log/nginx/*.log /var/log/php-fpm/*.log /var/log/mysql/*.log "
+              "/home/*/*/logs/*.log 2>/dev/null; echo done", 60, merge=True)
+    for s_ in ("nginx", "mariadb"):
+        hostvn.svc("reload", s_)
+    return "Đã xoá error log của Nginx, PHP, MariaDB và các website."
+
+
+async def cb_lg(update, context, action, params):
+    q = update.callback_query
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_LEMP):
+        return await q.edit_message_text(texts.DENY, parse_mode=HTML)
+
+    if action in _LOG_FILES:
+        path, label = _LOG_FILES[action]
+        return await _progress_op(
+            update, True, f"{E['log']} <b>Đang đọc {texts.esc(label)}</b>…",
+            asyncio.to_thread(_tail_log, path),
+            lambda t: (title(E["log"], label, pre(t[-3000:])), menus.back_only("m|log")),
+            est=5.0)
+    if action == "site":
+        return await _progress_op(
+            update, True, f"{E['log']} <b>Đang đọc log website</b>…",
+            asyncio.to_thread(_site_logs),
+            lambda t: (title(E["log"], "Website error log", pre(t[-3000:])),
+                       menus.back_only("m|log")), est=8.0)
+    if action == "clear":
+        if not can_write(chat):
+            return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                             reply_markup=menus.back_only("m|log"))
+        return await q.edit_message_text(
+            title(E["warn"], "Xoá error log",
+                  "Xoá toàn bộ error log của Nginx, PHP, MariaDB và các website?"),
+            parse_mode=HTML, reply_markup=menus.confirm_menu("logclr", back="m|log"))
+
+
 # ---- Cache (mien "cc") ------------------------------------------------------ #
 async def cb_cc(update, context, action, params):
     q = update.callback_query
@@ -1015,6 +1204,12 @@ async def cb_yes(update, context, what, params):
             stages=[(40, f"{E['del']} <b>Xoá vHost &amp; PHP pool</b>…"),
                     (70, f"{E['del']} <b>Xoá user, thư mục &amp; database</b>…")],
         )
+    if what == "logclr":
+        return await _progress_op(
+            update, True, f"{E['log']} <b>Đang xoá error log</b>…",
+            asyncio.to_thread(_clear_logs),
+            lambda msg: (title(E["confirm"], "Xoá log", texts.esc(msg)),
+                         menus.back_only("m|log")), est=10.0)
     if what == "clrall":
         return await _progress_op(
             update, True, f"{E['cache']} <b>Đang xoá toàn bộ cache</b>…",
@@ -1246,5 +1441,5 @@ async def handle_flow(update, context, flow, text):
 CALLBACK_ROUTES = {
     "nav": cb_nav, "m": cb_open, "a": cb_action, "svc": cb_svc, "do": cb_do,
     "pick": cb_pick, "nd": cb_nd, "cf": cb_cf, "yes": cb_yes, "bk": cb_bk,
-    "dm": cb_dm, "ssl": cb_ssl, "cc": cb_cc,
+    "dm": cb_dm, "ssl": cb_ssl, "cc": cb_cc, "lg": cb_lg, "pp": cb_pp,
 }

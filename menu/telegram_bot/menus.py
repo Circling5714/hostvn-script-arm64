@@ -21,13 +21,42 @@ from permissions import can_see
 # MENU CHINH - khai bao bang DU LIEU (feature_key, "emoji nhan"), cap 2 nut/hang
 # --------------------------------------------------------------------------- #
 MAIN_MENU: list[list[tuple[str, str]]] = [
-    [(C.F_DOMAIN, f"{C.E['domain']} Domain"),   (C.F_DB,   f"{C.E['db']} Database")],
+    [(C.F_DOMAIN, f"{C.E['domain']} Domain"),   (C.F_LEMP, f"{C.E['lemp']} LEMP")],
     [(C.F_WP,     f"{C.E['wp']} WordPress"),    (C.F_SSL,  f"{C.E['ssl']} SSL")],
     [(C.F_CACHE,  f"{C.E['cache']} Cache"),     (C.F_BACKUP, f"{C.E['backup']} Backup")],
-    [(C.F_FW,     f"{C.E['fw']} Firewall"),     (C.F_PHP,  f"{C.E['php']} PHP")],
-    [(C.F_SVC,    f"{C.E['svc']} Dịch vụ"),     (C.F_SYS,  f"{C.E['sys']} Hệ thống")],
-    [(C.F_VPS,    f"{C.E['vps']} VPS"),         (C.F_TOOL, f"{C.E['tool']} Công cụ")],
+    [(C.F_FW,     f"{C.E['fw']} Firewall"),     (C.F_SVC,  f"{C.E['svc']} Dịch vụ")],
+    [(C.F_SYS,    f"{C.E['sys']} Hệ thống"),    (C.F_VPS,  f"{C.E['vps']} VPS")],
+    [(C.F_TOOL,   f"{C.E['tool']} Công cụ")],
 ]
+
+
+def lemp_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '4. Quan ly LEMP' cua shell: Nginx / PHP / Database / Log."""
+    return rows_menu([
+        [(f"{C.E['svc']} Nginx", "m|nginx"), (f"{C.E['php']} PHP", "m|php")],
+        [(f"{C.E['db']} Database", "m|db"),  (f"{C.E['log']} Log", "m|log")],
+    ])
+
+
+def nginx_menu() -> InlineKeyboardMarkup:
+    """Mirror lemp_nginx (4 muc)."""
+    return rows_menu([
+        [(f"{C.E['refresh']} Restart Nginx", "do|nginx|restart")],
+        [(f"{C.E['confirm']} Test cấu hình Nginx", "a|ngx_test")],
+        [(f"{C.E['add']} Update Nginx", "a|ngx_update")],
+        [("🔨 Rebuild Nginx", "a|ngx_rebuild")],
+    ], back="m|lemp")
+
+
+def log_menu() -> InlineKeyboardMarkup:
+    """Mirror lemp_log (5 muc)."""
+    return rows_menu([
+        [(f"{C.E['svc']} Nginx error log", "lg|nginx")],
+        [(f"{C.E['php']} PHP error log", "lg|php")],
+        [(f"{C.E['db']} MariaDB error log", "lg|mysql")],
+        [(f"{C.E['domain']} Website error log", "lg|site")],
+        [(f"{C.E['del']} Xoá toàn bộ error log", "lg|clear")],
+    ], back="m|lemp")
 
 LABEL_TO_FEATURE: dict[str, str] = {label: key for row in MAIN_MENU for (key, label) in row}
 
@@ -120,11 +149,16 @@ def source_menu(domain: str, back: str = "m|domain") -> InlineKeyboardMarkup:
 
 
 def db_menu() -> InlineKeyboardMarkup:
+    """Mirror lemp_database (7 muc)."""
     return rows_menu([
         [(f"{C.E['list']} Danh sách DB", "a|db_list")],
-        [(f"{C.E['add']} Tạo database", "a|db_add")],
-        [(f"{C.E['del']} Xoá database", "a|db_del")],
-    ])
+        [(f"{C.E['add']} Tạo database", "a|db_add"),
+         (f"{C.E['del']} Xoá database", "a|db_del")],
+        [(f"{C.E['key']} Đổi mật khẩu MySQL user", "a|db_pass")],
+        [(f"{C.E['refresh']} Restart MariaDB", "do|mariadb|restart")],
+        [("📥 Import database", "a|db_import"),
+         ("🌐 Remote MySQL", "a|db_remote")],
+    ], back="m|lemp")
 
 
 def wp_menu() -> InlineKeyboardMarkup:
@@ -250,10 +284,19 @@ def fw_menu() -> InlineKeyboardMarkup:
 
 
 def php_menu() -> InlineKeyboardMarkup:
+    """Mirror lemp_php (10 muc)."""
     return rows_menu([
         [(f"{C.E['info']} php.ini settings", "a|php_info")],
         [(f"{C.E['refresh']} Restart PHP-FPM", "a|php_restart")],
-    ])
+        [("⚙️ Cấu hình tham số PHP", "a|php_params")],
+        [("🔀 Đổi PHP mặc định", "a|php_default"),
+         ("2️⃣ PHP thứ hai", "a|php_second")],
+        [("🧩 Cài ionCube", "a|php_ioncube")],
+        [("🔒 Open Basedir", "pp|basedir"),
+         ("🌐 allow_url_fopen", "pp|urlfopen")],
+        [("⚡ proc_open/proc_close", "pp|procopen"),
+         ("🎛️ PHP Process Manager", "a|php_pm")],
+    ], back="m|lemp")
 
 
 def sys_menu() -> InlineKeyboardMarkup:
