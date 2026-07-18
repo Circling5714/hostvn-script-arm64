@@ -299,10 +299,21 @@ _svc_manual() {
             esac ;;
 
         fail2ban)
+            # Trong chroot (khong systemd) /var/run KHONG duoc don khi boot, nen sau khi
+            # may/container tat dot ngot thi fail2ban.sock + .pid cu con sot lai va
+            # 'fail2ban-client start' se tu choi khoi dong. Don socket mo coi truoc khi start.
+            _f2b_start() {
+                if fail2ban-client ping >/dev/null 2>&1; then
+                    return 0        # dang chay that -> khong lam gi
+                fi
+                rm -f /var/run/fail2ban/fail2ban.sock /var/run/fail2ban/fail2ban.pid 2>/dev/null
+                mkdir -p /var/run/fail2ban 2>/dev/null
+                fail2ban-client -x start 2>/dev/null
+            }
             case "${action}" in
-                start)   fail2ban-client start 2>/dev/null ;;
+                start)   _f2b_start ;;
                 stop)    fail2ban-client stop 2>/dev/null ;;
-                restart) fail2ban-client reload 2>/dev/null || { fail2ban-client stop 2>/dev/null; sleep 1; fail2ban-client start 2>/dev/null; } ;;
+                restart) fail2ban-client reload 2>/dev/null || { fail2ban-client stop 2>/dev/null; sleep 1; _f2b_start; } ;;
                 reload)  fail2ban-client reload 2>/dev/null ;;
                 is-active) fail2ban-client ping >/dev/null 2>&1 && echo active || { echo inactive; return 3; } ;;
             esac ;;
