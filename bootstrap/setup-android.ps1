@@ -34,17 +34,24 @@ param(
     # Duong dan adb.exe (mac dinh: tim trong PATH)
     [string]$AdbPath = 'adb',
 
+    # Phien ban Ubuntu: 24.04 (on dinh) hoac 26.04 (experimental - PPA ondrej/php co the
+    # chua ho tro -> script se dung PHP mac dinh cua distro)
+    [ValidateSet('24.04','26.04')]
+    [string]$UbuntuVersion = '24.04',
+
     # Cau hinh container
     [string]$Profile      = 'noble',
-    [string]$Suite        = 'noble',                      # Ubuntu 24.04
+    [string]$Suite        = 'noble',                      # nhan cho Linux Deploy (rootfs tu quyet dinh OS that)
     [string]$ImagePath    = '/data/local/ubuntu24.img',   # PHAI o /data (block that), KHONG o /sdcard (FUSE)
     [int]   $ImageSizeMB  = 12000,
     [int]   $SshPort      = 2233,
-    [string]$RootfsUrl    = 'https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.2-base-arm64.tar.gz',
 
-    # Nguon APK Linux Deploy (GitHub release). Co the tai san roi tro qua -ApkLocal.
-    [string]$ApkUrl   = 'https://github.com/meefik/linuxdeploy/releases/download/2.6.0/linuxDeploy-arm64-v8a-2.6.0-5216.apk',
-    [string]$ApkLocal = '',
+    # Nguon binary: MAC DINH tai tu GitHub Release CUA DU AN (khong phai nguon ngoai).
+    # De trong de tu lay tu Release; hoac tro *Local toi file da tai san de chay OFFLINE.
+    [string]$RootfsUrl   = '',
+    [string]$RootfsLocal = '',
+    [string]$ApkUrl      = '',
+    [string]$ApkLocal    = '',
 
     # Repo hostvn-script-arm64 (clone trong container). Hoac dung -RepoLocal de day tu PC.
     [string]$RepoUrl   = 'https://github.com/Circling5714/hostvn-script-arm64.git',
@@ -63,6 +70,13 @@ $LD = 'ru.meefik.linuxdeploy'
 $LDFILES = "/data/data/$LD/files"
 $CLI = "$LDFILES/cli.sh"
 
+# GitHub Release CUA DU AN - nguon binary mac dinh (khong phai nguon ngoai)
+$ReleaseBase = 'https://github.com/Circling5714/hostvn-script-arm64/releases/download/assets-v1'
+if (-not $ApkUrl)    { $ApkUrl    = "$ReleaseBase/linuxdeploy-2.6.0.apk" }
+if (-not $RootfsUrl) { $RootfsUrl = "$ReleaseBase/ubuntu-base-$UbuntuVersion-arm64.tar.gz" }
+$AdbZipUrl = "$ReleaseBase/platform-tools-adb-windows.zip"
+$ToolsDir  = Join-Path $PSScriptRoot 'tools'
+
 function Info($m){ Write-Host "[*] $m" -ForegroundColor Cyan }
 function Ok($m){ Write-Host "[OK] $m" -ForegroundColor Green }
 function Warn($m){ Write-Host "[!] $m" -ForegroundColor Yellow }
@@ -79,12 +93,37 @@ function Adb { & $AdbPath @args }
 function AdbSh([string]$cmd){ & $AdbPath shell $cmd }
 function AdbSu([string]$cmd){ & $AdbPath shell "su -c '$cmd'" }
 
+# Tai asset: uu tien file local (offline); khong thi tai tu URL (Release cua du an)
+function Get-Asset([string]$local, [string]$url, [string]$dest){
+    if ($local -and (Test-Path $local)) { Info "Dung file da co: $local"; Copy-Item $local $dest -Force; return $dest }
+    Info "Tai: $url"
+    Invoke-WebRequest -Uri $url -OutFile $dest
+    return $dest
+}
+
+# Dam bao co adb: neu -AdbPath/PATH khong co adb -> tu tai platform-tools tu Release du an.
+# (Che do WiFi/TCP chi can adb.exe; che do USB con can driver OEM cua hang - khong nhung chung duoc.)
+function Resolve-Adb {
+    $found = $false
+    try { $null = & $AdbPath version 2>$null; if ($LASTEXITCODE -eq 0) { $found = $true } } catch {}
+    if ($found) { Ok "Da co adb: $AdbPath"; return }
+    Warn "May chua co adb. Tai adb (platform-tools) tu Release cua du an..."
+    New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
+    $zip = Join-Path $ToolsDir 'platform-tools-adb-windows.zip'
+    Invoke-WebRequest -Uri $AdbZipUrl -OutFile $zip
+    Expand-Archive -Path $zip -DestinationPath $ToolsDir -Force
+    $script:AdbPath = Join-Path $ToolsDir 'adb.exe'
+    if (-not (Test-Path $script:AdbPath)) { Die "Tai adb that bai." }
+    try { $null = & $script:AdbPath version 2>$null } catch { Die "adb tai ve khong chay duoc." }
+    Ok "Da co adb (tu Release): $script:AdbPath"
+}
+
 # ============================================================================
 # PHASE 1: adb connection + kiem tra root
 # ============================================================================
 function Phase-Adb {
     Info "Phase 1: ket noi adb (che do: $AdbMode)"
-    try { $null = & $AdbPath version } catch { Die "Khong tim thay adb. Cai Android platform-tools hoac dat -AdbPath." }
+    Resolve-Adb   # tu tai adb tu Release neu may chua co
 
     if ($AdbMode -eq 'tcp') {
         if (-not $DeviceAddr) { Die "Che do tcp can -DeviceAddr IP:port (vd 10.10.17.31:30555). Neu chua bat, cam USB va chay: adb tcpip 5555" }
@@ -123,12 +162,7 @@ function Phase-Apk {
     if ($installed -match 'package:') {
         Ok "Linux Deploy da cai san."
     } else {
-        $apk = $ApkLocal
-        if (-not $apk) {
-            $apk = Join-Path $env:TEMP 'linuxdeploy.apk'
-            Info "Tai APK Linux Deploy: $ApkUrl"
-            Invoke-WebRequest -Uri $ApkUrl -OutFile $apk
-        }
+        $apk = Get-Asset $ApkLocal $ApkUrl (Join-Path $env:TEMP 'linuxdeploy.apk')
         if (-not (Test-Path $apk)) { Die "Khong thay APK: $apk" }
         Info "adb install $apk"
         Adb install -r $apk | Out-Null
@@ -151,13 +185,11 @@ function Phase-Apk {
 # PHASE 3: cau hinh profile + deploy Ubuntu (rootfs -> image tren /data)
 # ============================================================================
 function Phase-Deploy {
-    Info "Phase 3: deploy Ubuntu 24.04 arm64 (image tren /data - block that, tranh vold reboot)"
+    Info "Phase 3: deploy Ubuntu $UbuntuVersion arm64 (image tren /data - block that, tranh vold reboot)"
+    if ($UbuntuVersion -eq '26.04') { Warn "Ubuntu 26.04 dang experimental (PPA ondrej/php co the chua ho tro -> dung PHP distro)." }
 
-    # Tai rootfs ubuntu-base va day len /sdcard de Linux Deploy import
-    $rootfsLocal = $ApkLocal
-    $rootfsTmp = Join-Path $env:TEMP 'ubuntu-base-arm64.tar.gz'
-    Info "Tai ubuntu-base rootfs: $RootfsUrl"
-    Invoke-WebRequest -Uri $RootfsUrl -OutFile $rootfsTmp
+    # Lay rootfs ubuntu-base: uu tien -RootfsLocal (offline), khong thi tai tu Release du an
+    $rootfsTmp = Get-Asset $RootfsLocal $RootfsUrl (Join-Path $env:TEMP "ubuntu-base-$UbuntuVersion-arm64.tar.gz")
     $rootfsDev = '/storage/emulated/0/ubuntu-rootfs.tar.gz'
     Info "Day rootfs len dien thoai: $rootfsDev"
     Adb push $rootfsTmp $rootfsDev | Out-Null
