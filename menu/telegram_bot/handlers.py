@@ -29,7 +29,9 @@ pre = texts.pre
 WRITE_ACTIONS = {"dom_add", "db_add", "cache_clear", "opcache_clear", "php_restart",
                  "bk_run", "bk_restore", "bk_del",
                  "dom_rename", "dom_rewrite", "dom_php", "dom_alias", "dom_redirect",
-                 "dom_sftp", "dom_protect", "dom_http3", "dom_clone", "dom_dbinfo"}
+                 "dom_sftp", "dom_protect", "dom_http3", "dom_clone", "dom_dbinfo",
+                 "ssl_create", "ssl_wildcard", "ssl_remove", "ssl_alias",
+                 "ssl_renew", "ssl_cfapi"}
 
 
 # --------------------------------------------------------------------------- #
@@ -344,6 +346,21 @@ async def cb_action(update, context, action, params):
         return await start_flow(update, context, "db_add", "m|db",
                                 E["db"], "Tạo database",
                                 "Nhập <b>tên database</b> (chỉ chữ/số/gạch dưới):")
+    # ----- SSL: cac buoc rieng -----
+    if action == "ssl_cfapi":
+        return await _progress_op(
+            update, True, "⏳ <b>Đang đọc cấu hình CF API…</b>",
+            asyncio.to_thread(hostvn.cf_api_status),
+            lambda st: (title("☁️", "CloudFlare DNS API", pre(st) +
+                              "\n\nDùng cho <b>Wildcard SSL</b> (xác thực DNS-01)."),
+                        menus.rows_menu([[("☁️ Nhập/Cập nhật token", "ssl|cfset")]], back="m|ssl")),
+            est=3.0)
+    if action == "ssl_renew":
+        return await q.edit_message_text(
+            title(E["warn"], "Gia hạn tất cả SSL",
+                  "Chạy gia hạn cho <b>toàn bộ</b> chứng chỉ? Có thể mất vài phút."),
+            parse_mode=HTML, reply_markup=menus.confirm_menu("sslrenew", back="m|ssl"))
+
     # ----- Backup: cac buoc rieng -----
     if action == "bk_del":
         return await _progress_op(
@@ -397,6 +414,15 @@ async def cb_action(update, context, action, params):
                          ("🔐", "Bảo vệ thư mục", "Chọn domain:")),
         "dom_http3":    (hostvn.list_domains, "dmhttp3", E["domain"], "m|domain",
                          ("🚀", "HTTP/3 (QUIC)", "Chọn domain:")),
+        # --- SSL ---
+        "ssl_create":   (hostvn.list_domains, "sslnew", E["ssl"], "m|ssl",
+                         (E["ssl"], "Cấp/Gia hạn Let's Encrypt", "Chọn domain:")),
+        "ssl_wildcard": (hostvn.list_domains, "sslwild", E["ssl"], "m|ssl",
+                         ("🌟", "Wildcard SSL", "Chọn domain gốc:")),
+        "ssl_remove":   (hostvn.list_domains, "ssldel", E["ssl"], "m|ssl",
+                         (E["del"], "Gỡ Let's Encrypt", "Chọn domain:")),
+        "ssl_alias":    (hostvn.list_domains, "sslalias", E["ssl"], "m|ssl",
+                         ("🔗", "SSL cho Alias domain", "Chọn domain chính:")),
     }
     if action in PICKERS:
         loader, pick_act, emo, back, (t_emo, t_head, t_hint) = PICKERS[action]
@@ -435,7 +461,12 @@ def _run_action(action: str, chat: int):
             lines.append(f"{E['wp']} {d} [{tag}]")
         return title(E["wp"], "Site WordPress", pre("\n".join(lines) or "(chưa có)")), "m|wp"
     if action == "ssl_check":
-        return title(E["ssl"], "Hạn SSL", pre(hostvn.ssl_expiry())), "m|ssl"
+        note = ""
+        if hostvn.is_tunnel_mode():
+            note = ("\n<i>Lưu ý: qua Cloudflare Tunnel, chứng chỉ người dùng thấy là của "
+                    "Cloudflare — không phản ánh chứng chỉ trên server.</i>")
+        return (title(E["month"], "Đối chiếu chứng chỉ",
+                      pre(hostvn.ssl_report()) + note), "m|ssl")
     if action == "f2b_stats":
         return title(E["fw"], "Fail2ban", pre(hostvn.fail2ban_stats())), "m|fw"
     if action == "php_info":
@@ -460,6 +491,26 @@ def _run_action(action: str, chat: int):
     if action == "bk_auto":
         return (title("⏰", "Auto backup", pre(hostvn.autobackup_info()) +
                       "\n<i>Đặt lịch chi tiết ở menu Cronjob trong shell.</i>"), "m|backup")
+    if action == "ssl_list":
+        rows = hostvn.ssl_list()
+        icon = {"letsencrypt": "🔒", "self-signed": "🟡", "none": "🔓"}
+        label = {"letsencrypt": "Let's Encrypt", "self-signed": "tự ký (hostvn)", "none": "không có"}
+        body = "\n".join(
+            f"{icon[r['kind']]} {r['domain']} — {label[r['kind']]}"
+            + (f"\n   hết hạn: {r['expire']}" if r["expire"] else "")
+            for r in rows) or "(chưa có domain)"
+        note = ""
+        if hostvn.is_tunnel_mode():
+            note = ("\n\n<i>Đang chạy Cloudflare Tunnel: TLS được Cloudflare xử lý ở biên, "
+                    "đoạn cloudflared→Cloudflare đã mã hoá sẵn. Chứng chỉ tự ký ở đây là bình "
+                    "thường và <b>không cần</b> cấp Let's Encrypt.</i>")
+        return title(E["ssl"], "Chứng chỉ trên server", pre(body) + note), "m|ssl"
+    if action == "ssl_paid":
+        return (title("📜", "SSL trả phí",
+                      "Quy trình này cần tạo CSR (nhập quốc gia, tỉnh, tổ chức…) rồi "
+                      "<b>dán nội dung file CRT/CA/Private Key</b> nhiều dòng — không phù hợp "
+                      "để nhập qua chat.\n\nChạy qua SSH: <code>hostvn</code> → "
+                      "<b>2. Quan ly SSL</b> → <b>2. SSL tra phi</b>."), "m|ssl")
     if action == "dom_clone":
         return (title("🧬", "Clone website",
                       "Clone gồm nhiều bước hỏi ghi đè dữ liệu nguồn/đích nên "
@@ -511,6 +562,26 @@ async def cb_pick(update, context, action, params):
             asyncio.to_thread(_wp_cache_flush, target),
             lambda _: (title(E["wp"], target, "Đã xoá cache WordPress (nếu có)."),
                        menus.back_only("m|wp")), est=6.0)
+    # ----- SSL: sau khi chon domain -> xac nhan roi chay -----
+    if action in ("sslnew", "sslwild", "ssldel", "sslalias"):
+        if not can_write(chat):
+            return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                             reply_markup=menus.back_only("m|ssl"))
+        what = {"sslnew": ("Cấp/Gia hạn Let's Encrypt cho", "sslnew"),
+                "sslwild": ("Cấp Wildcard SSL cho *.", "sslwild"),
+                "ssldel": ("GỠ chứng chỉ Let's Encrypt của", "ssldel"),
+                "sslalias": ("Cấp SSL cho Alias domain của", "sslalias")}[action]
+        extra = ""
+        if action in ("sslnew", "sslalias") and await asyncio.to_thread(hostvn.is_tunnel_mode):
+            extra = ("\n\n⚠️ Đang chạy <b>Cloudflare Tunnel</b>: TLS đã do Cloudflare xử lý nên "
+                     "chứng chỉ này thường <b>không cần</b>, và xác thực HTTP-01 có thể thất bại "
+                     "vì port 80 không mở trực tiếp ra Internet.\n"
+                     "Muốn có chứng chỉ thật trên server thì dùng <b>Wildcard SSL (CF DNS)</b>.")
+        return await q.edit_message_text(
+            title(E["warn"], "Xác nhận", f"{what[0]}<b>{texts.esc(target)}</b>?" + extra),
+            parse_mode=HTML,
+            reply_markup=menus.confirm_menu(what[1], target, back="m|ssl"))
+
     # ----- Quan ly domain nang cao: sau khi chon domain -----
     if action in ("dmrename", "dmrw", "dmphp", "dmalias", "dmredir",
                   "dmsftp", "dmprot", "dmhttp3"):
@@ -662,6 +733,23 @@ async def cb_nd(update, context, typ, params):
     await _progress_op(update, True, base,
                        asyncio.to_thread(hostvn.create_domain, typ, domain),
                        render, est=est, stages=stages)
+
+
+# ---- SSL (mien "ssl") ------------------------------------------------------- #
+async def cb_ssl(update, context, action, params):
+    q = update.callback_query
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_SSL):
+        return await q.edit_message_text(texts.DENY, parse_mode=HTML)
+    if not can_write(chat):
+        return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                         reply_markup=menus.back_only("m|ssl"))
+    if action == "cfset":
+        return await start_flow(
+            update, context, "ssl_cfapi", "m|ssl", "☁️", "CloudFlare DNS API",
+            "Gửi <b>token</b> và <b>email</b> cách nhau bởi dấu cách.\n"
+            "Ví dụ: <code>cfut_xxxxx you@mail.com</code>\n\n"
+            "⚠️ <b>Hãy xoá tin nhắn đó sau khi gửi</b> — token nằm trong lịch sử chat.")
 
 
 # ---- Quan ly domain nang cao (mien "dm") ------------------------------------ #
@@ -833,6 +921,43 @@ async def cb_yes(update, context, what, params):
             stages=[(40, f"{E['del']} <b>Xoá vHost &amp; PHP pool</b>…"),
                     (70, f"{E['del']} <b>Xoá user, thư mục &amp; database</b>…")],
         )
+    # ----- SSL -----
+    _SSL_OPS = {
+        "sslnew":   (hostvn.ssl_create,   "Cấp SSL", 90.0),
+        "sslwild":  (hostvn.ssl_wildcard, "Wildcard SSL", 180.0),
+        "ssldel":   (hostvn.ssl_remove,   "Gỡ SSL", 30.0),
+    }
+    if what in _SSL_OPS:
+        fn, label, est = _SSL_OPS[what]
+        return await _progress_op(
+            update, True, f"{E['ssl']} <b>{label}</b> — {texts.esc(param)}…",
+            asyncio.to_thread(fn, param),
+            lambda r: ((title(E["confirm"], label,
+                              f"<code>{progress.bar(100)}</code>\n{texts.esc(r[1])}") if r[0]
+                        else title(E["warn"], f"{label} thất bại", texts.esc(r[1]))),
+                       menus.back_only("m|ssl")),
+            est=est,
+            stages=[(40, f"{E['ssl']} <b>Đang xác thực với Let's Encrypt</b>…"),
+                    (75, "🔄 <b>Đang cài chứng chỉ &amp; reload nginx</b>…")])
+    if what == "sslalias":
+        return await _progress_op(
+            update, True, f"{E['ssl']} <b>SSL Alias</b> — {texts.esc(param)}…",
+            asyncio.to_thread(hostvn.run_ctl, f"{hostvn.domain_index(param)}\n1",
+                              f"{hostvn.SSLCTL}/le_alias_domain", 300),
+            lambda out: (title(E["info"], "SSL Alias domain",
+                               pre(hostvn._ctl_reason(out, "Đã chạy xong."))),
+                         menus.back_only("m|ssl")),
+            est=90.0)
+    if what == "sslrenew":
+        return await _progress_op(
+            update, True, f"{E['refresh']} <b>Đang gia hạn toàn bộ SSL</b>…",
+            asyncio.to_thread(hostvn.ssl_renew_all),
+            lambda r: (title(E["confirm"], "Gia hạn SSL",
+                             f"<code>{progress.bar(100)}</code>\n{texts.esc(r[1])}"),
+                       menus.back_only("m|ssl")),
+            est=180.0,
+            stages=[(50, f"{E['ssl']} <b>Đang liên hệ Let's Encrypt</b>…")])
+
     if what == "sftp":      # yes|sftp|<domain> -> doi mat khau SFTP ngau nhien
         return await _progress_op(
             update, True, f"{E['key']} <b>Đang đổi mật khẩu SFTP</b> {texts.esc(param)}…",
@@ -925,6 +1050,24 @@ async def handle_flow(update, context, flow, text):
             await editor(f"{E['warn']} {err} Nhập lại hoặc bấm ❌ Hủy.")
         return
 
+    if flow == "ssl_cfapi":
+        bits = text.split()
+        if len(bits) < 2:
+            return await update.message.reply_text(
+                f"{E['warn']} Cần đủ <b>token</b> và <b>email</b>. Nhập lại:", parse_mode=HTML)
+        editor = await _make_editor(update, False)
+        ok, msg = await progress.run(
+            editor, "☁️ <b>Đang lưu CloudFlare DNS API</b>…",
+            asyncio.to_thread(hostvn.ssl_cf_api_set, bits[0], bits[1]), est=10.0)
+        await editor(title(E["confirm"] if ok else E["warn"],
+                           "CloudFlare DNS API", texts.esc(msg) +
+                           ("\n\n⚠️ <b>Nhớ xoá tin nhắn chứa token</b> ở trên." if ok else "")))
+        context.user_data.pop("flow", None)
+        await update.message.reply_text(
+            title(E["home"], "Menu chính", "Chọn chức năng từ <b>menu bên dưới</b>."),
+            parse_mode=HTML, reply_markup=menus.build_keyboard(_features(chat)))
+        return
+
     # ----- Cac flow quan ly domain nang cao -----
     if flow in ("dom_rename", "dom_alias", "dom_redirect", "dom_protect"):
         dom = context.user_data.get("dom", "")
@@ -992,5 +1135,5 @@ async def handle_flow(update, context, flow, text):
 CALLBACK_ROUTES = {
     "nav": cb_nav, "m": cb_open, "a": cb_action, "svc": cb_svc, "do": cb_do,
     "pick": cb_pick, "nd": cb_nd, "cf": cb_cf, "yes": cb_yes, "bk": cb_bk,
-    "dm": cb_dm,
+    "dm": cb_dm, "ssl": cb_ssl,
 }

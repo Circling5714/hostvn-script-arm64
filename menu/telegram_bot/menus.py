@@ -135,8 +135,17 @@ def wp_menu() -> InlineKeyboardMarkup:
 
 
 def ssl_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '2. Quan ly SSL' (Let's Encrypt 7 muc + SSL tra phi)."""
     return rows_menu([
-        [(f"{C.E['month']} Kiểm tra hạn SSL", "a|ssl_check")],
+        [(f"{C.E['list']} Trạng thái SSL", "a|ssl_list"),
+         (f"{C.E['month']} Kiểm tra hạn", "a|ssl_check")],
+        [(f"{C.E['add']} Cấp/Gia hạn Let's Encrypt", "a|ssl_create")],
+        [("🌟 Wildcard SSL (CF DNS)", "a|ssl_wildcard")],
+        [(f"{C.E['refresh']} Gia hạn tất cả", "a|ssl_renew")],
+        [("🔗 SSL cho Alias domain", "a|ssl_alias"),
+         (f"{C.E['del']} Gỡ Let's Encrypt", "a|ssl_remove")],
+        [("☁️ CloudFlare DNS API", "a|ssl_cfapi")],
+        [("📜 SSL trả phí (CSR/CRT)", "a|ssl_paid")],
     ])
 
 

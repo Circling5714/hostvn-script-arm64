@@ -510,6 +510,162 @@ def dom_protect_dir(domain: str, path: str, user: str, password: str) -> tuple[b
     return False, f"nginx test lỗi: {ok[:180]}"
 
 
+# --------------------------------------------------------------------------- #
+# Quan ly SSL (mirror menu "2. Quan ly SSL")
+# _select_ssl_le_website dung CUNG glob voi _select_domain -> domain_index() dung chung.
+# --------------------------------------------------------------------------- #
+SSLCTL = "/var/hostvn/menu/controller/ssl"
+SSL_DIR = "/etc/nginx/ssl"
+CF_API_CONF = "/var/hostvn/.cf_api.conf"
+
+
+def ssl_has_cert(domain: str) -> bool:
+    d = Path(SSL_DIR) / domain
+    cert, key = d / "cert.pem", d / "key.pem"
+    return cert.exists() and key.exists() and cert.stat().st_size > 0
+
+
+def is_tunnel_mode() -> bool:
+    return "tunnel" in conf_val("network_mode")
+
+
+def _cert_fields(cmd: str) -> dict:
+    out = sh(cmd, 15)
+    g = lambda k: (re.search(rf"^{k}=(.*)$", out, re.M).group(1).strip()
+                   if re.search(rf"^{k}=(.*)$", out, re.M) else "")
+    return {"issuer": g("issuer"), "subject": g("subject"), "expire": g("notAfter")}
+
+
+def ssl_local_info(domain: str) -> dict:
+    """Chung chi THUC SU tren server nay (khong ra Internet).
+
+    kind: letsencrypt = co cert rieng cho domain;
+          self-signed = dung cert chung hostvn tu ky luc cai;
+          none        = vhost khong khai bao SSL.
+    """
+    cert = Path(SSL_DIR) / domain / "cert.pem"
+    if cert.exists() and cert.stat().st_size > 0:
+        info = _cert_fields(f"openssl x509 -noout -issuer -enddate -in {shlex.quote(str(cert))} 2>/dev/null")
+        info["kind"] = "letsencrypt"
+        return info
+    # Doc THANG duong dan tu chi thi ssl_certificate trong vhost (khong doan ten file)
+    vhost = Path(C.VHOST_DIR) / f"{domain}.conf"
+    if vhost.exists():
+        m = re.search(r"^\s*ssl_certificate\s+([^;]+);", vhost.read_text(errors="replace"), re.M)
+        if m:
+            p = Path(m.group(1).strip())
+            if p.exists() and p.stat().st_size > 0:
+                info = _cert_fields(
+                    f"openssl x509 -noout -issuer -enddate -in {shlex.quote(str(p))} 2>/dev/null")
+                iss = info["issuer"].lower()
+                info["kind"] = "letsencrypt" if ("let's encrypt" in iss or "r3" in iss
+                                                 or "e5" in iss or "e6" in iss) else "self-signed"
+                info["path"] = str(p)
+                return info
+    return {"kind": "none", "issuer": "", "subject": "", "expire": ""}
+
+
+def ssl_edge_info(domain: str) -> dict:
+    """Chung chi NGUOI DUNG THAY khi truy cap domain (co the la cua Cloudflare)."""
+    info = _cert_fields(
+        f"echo | timeout 10 openssl s_client -connect {shlex.quote(domain)}:443 "
+        f"-servername {shlex.quote(domain)} 2>/dev/null | openssl x509 -noout -issuer -subject -enddate 2>/dev/null")
+    iss = info["issuer"].lower()
+    info["is_cloudflare"] = ("cloudflare" in iss or "google trust" in iss)
+    return info
+
+
+def ssl_list() -> list[dict]:
+    """Trang thai chung chi tren SERVER (doc file, khong can mang)."""
+    rows = []
+    for d in list_domains():
+        info = ssl_local_info(d)
+        rows.append({"domain": d, "kind": info["kind"], "has_cert": info["kind"] == "letsencrypt",
+                     "expire": info["expire"], "issuer": info["issuer"]})
+    return rows
+
+
+def ssl_report() -> str:
+    """Bao cao trung thuc: cert TREN SERVER vs cert NGUOI DUNG THAY (bien Cloudflare)."""
+    lines = []
+    for d in list_domains():
+        loc, edge = ssl_local_info(d), ssl_edge_info(d)
+        lines.append(f"● {d}")
+        kind = {"letsencrypt": "Let's Encrypt (riêng)", "self-signed": "tự ký của hostvn",
+                "none": "không có"}[loc["kind"]]
+        lines.append(f"   Trên server : {kind}"
+                     + (f" · hết hạn {loc['expire']}" if loc["expire"] else ""))
+        if edge["expire"]:
+            who = "Cloudflare (biên)" if edge.get("is_cloudflare") else "chính server này"
+            lines.append(f"   Người dùng thấy: {who} · hết hạn {edge['expire']}")
+        else:
+            lines.append("   Người dùng thấy: không kết nối được :443")
+    return "\n".join(lines) or "(chưa có domain)"
+
+
+def cf_api_status() -> str:
+    p = Path(CF_API_CONF)
+    if not p.exists():
+        return "Chưa cấu hình CloudFlare DNS API."
+    txt = p.read_text(errors="replace")
+    email = re.search(r"^CF_Email=(.*)$", txt, re.M)
+    tok = re.search(r"^CF_Token=(.*)$", txt, re.M)
+    masked = "(có)" if tok and tok.group(1).strip() else "(trống)"
+    return f"Đã cấu hình.\nEmail: {email.group(1).strip() if email else '?'}\nToken: {masked}"
+
+
+def ssl_cf_api_set(token: str, email: str) -> tuple[bool, str]:
+    if not token or len(token) < 20:
+        return False, "Token không hợp lệ."
+    if "@" not in email:
+        return False, "Email không hợp lệ."
+    out = run_ctl(f"1\n{token}\n{email}", f"{SSLCTL}/cf_api", 90)
+    if Path(CF_API_CONF).exists():
+        return True, "Đã lưu CloudFlare DNS API."
+    return False, _ctl_reason(out, "Không lưu được CF API.")
+
+
+def ssl_renew_all() -> tuple[bool, str]:
+    out = run_ctl("1", f"{SSLCTL}/renew_all_ssl", 600)
+    return True, _ctl_reason(out, "Đã chạy gia hạn toàn bộ SSL.")
+
+
+def ssl_remove(domain: str, source_idx: int = 20) -> tuple[bool, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    out = run_ctl(f"{idx}\n{source_idx}", f"{SSLCTL}/remove_le", 180)
+    if not ssl_has_cert(domain):
+        svc("reload", "nginx")
+        return True, f"Đã gỡ SSL Let's Encrypt của {domain}."
+    return False, _ctl_reason(out, "Không gỡ được SSL.")
+
+
+def ssl_create(domain: str) -> tuple[bool, str]:
+    """Dang ky/gia han Let's Encrypt (HTTP-01) cho 1 domain."""
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    out = run_ctl(f"1\n{idx}\ny\n1", f"{SSLCTL}/create_le_ssl", 400)
+    if ssl_has_cert(domain):
+        svc("reload", "nginx")
+        return True, f"Đã cấp SSL cho {domain}."
+    return False, _ctl_reason(out, "Không cấp được SSL.")
+
+
+def ssl_wildcard(domain: str) -> tuple[bool, str]:
+    if not Path(CF_API_CONF).exists():
+        return False, "Chưa cấu hình CloudFlare DNS API — vào mục CloudFlare DNS API trước."
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    out = run_ctl(f"{idx}\n1", f"{SSLCTL}/wildcard", 600)
+    if ssl_has_cert(domain):
+        svc("reload", "nginx")
+        return True, f"Đã cấp wildcard SSL cho *.{domain}."
+    return False, _ctl_reason(out, "Không cấp được wildcard SSL.")
+
+
 def php_versions() -> list[str]:
     out = sh("ls /etc/php 2>/dev/null", 10)
     return sorted(x for x in out.split() if x[:1].isdigit())
