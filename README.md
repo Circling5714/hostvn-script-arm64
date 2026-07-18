@@ -72,7 +72,30 @@ Script tự phát hiện Android/không-systemd và áp dụng toàn bộ điề
 
 Giống bản VPS (Nginx, MariaDB, PHP ondrej, phpMyAdmin, PECL, Rclone, WP-CLI, ClamAV…) — xem `PROJECT.md`.
 
-## 6. Credits
+## 6. Telegram Control Bot
+
+Quản trị server bằng **nút bấm trên Telegram**, không cần SSH. Menu chính có
+**16 nút, ánh xạ 1:1 với 15 mục của menu shell** `hostvn` (Domain, LEMP —
+gồm Nginx/PHP/Database/Log, WordPress, SSL, cache, backup, firewall, dịch vụ,
+hệ thống, VPS, công cụ + Admin Tool, phân quyền, thông tin tài khoản, cronjob,
+cập nhật script, đổi ngôn ngữ).
+
+Bot viết bằng Python bất đồng bộ (`python-telegram-bot`), chạy trong venv riêng
+và khởi động qua lớp `_svc` nên hoạt động ở cả systemd lẫn Android/chroot. Mọi
+thao tác đều có **thanh tiến trình động**; thao tác nguy hiểm có bước xác nhận;
+những luồng cần nhập nhiều dữ liệu được hướng dẫn làm qua SSH thay vì giả lập.
+
+Cài đặt: `hostvn` → **13. Công cụ → 8. Enable/Disable Telegram notify →
+5. Telegram Bot điều khiển server**.
+
+Bảo mật: whitelist Chat ID bắt buộc, chế độ chỉ xem `notify` và chế độ điều khiển
+`menu` (tên cũ `shell` vẫn nhận để tương thích, nhưng backend Python **không**
+cung cấp `/sh`).
+
+Chi tiết cài đặt, phân quyền và xử lý sự cố:
+[`menu/telegram_bot/README.md`](menu/telegram_bot/README.md).
+
+## 7. Credits
 
 - Gốc: Sanvv (HOSTVN), f97
 - Rebuild Ubuntu mới + bản ARM64/Android: QMV (2026)
