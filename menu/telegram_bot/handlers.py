@@ -17,6 +17,7 @@ from telegram.ext import ContextTypes
 import config as C
 import hostvn
 import menus
+import progress
 import texts
 from permissions import can_write, get_user_features, has_feature, is_allowed
 
@@ -40,6 +41,46 @@ async def _show(update: Update, text: str, kb, edit: bool) -> None:
 
 def _features(chat_id: int):
     return get_user_features(chat_id)
+
+
+async def _make_editor(update: Update, edit_existing: bool):
+    """Tra ve async editor(text, kb=None) nham vao tin can cap nhat.
+
+    - callback: sua chinh tin nhan vua bam (edit_existing=True).
+    - text tap: gui 1 tin '⏳' roi sua dan (edit_existing=False).
+    Dung cho ca khung animate (goi editor(text)) lan ket qua (editor(text, kb)).
+    """
+    if edit_existing and update.callback_query:
+        q = update.callback_query
+
+        async def _edit_cb(text, kb=None):
+            try:
+                await q.edit_message_text(text, parse_mode=HTML, reply_markup=kb)
+            except Exception:  # noqa: BLE001
+                pass
+        return _edit_cb
+
+    msg = await update.effective_message.reply_text(
+        f"⏳ <b>Đang tải…</b>\n<code>{progress.bar(3)}</code>", parse_mode=HTML)
+
+    async def _edit_msg(text, kb=None):
+        try:
+            await msg.edit_text(text, parse_mode=HTML, reply_markup=kb)
+        except Exception:  # noqa: BLE001
+            pass
+    return _edit_msg
+
+
+async def _progress_op(update, edit_existing, loading_title, work, render, est=5.0, stages=None):
+    """Hien thanh tien trinh khi chay 'work' (awaitable) roi hien ket qua.
+
+    render(result) -> (text, keyboard).
+    """
+    editor = await _make_editor(update, edit_existing)
+    result = await progress.run(editor, loading_title, work, est=est, stages=stages)
+    text, kb = render(result)
+    await editor(text, kb)
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -186,12 +227,22 @@ GROUP_SCREENS = {
 }
 
 
+# Nhan hien thi cua tung nhom (dung cho tieu de thanh tien trinh)
+FEATURE_LABEL = {k: lbl for row in menus.MAIN_MENU for k, lbl in row}
+
+
 async def open_group(update: Update, context: ContextTypes.DEFAULT_TYPE, feature: str, edit: bool) -> None:
     builder = GROUP_SCREENS.get(feature)
     if builder is None:
         return await show_menu(update, context)
-    text, kb = await asyncio.to_thread(builder)
-    await _show(update, text, kb, edit)
+    label = FEATURE_LABEL.get(feature, "")
+    await _progress_op(
+        update, edit,
+        f"⏳ <b>Đang tải</b> {texts.esc(label)}…",
+        asyncio.to_thread(builder),
+        lambda r: r,          # builder da tra (text, keyboard)
+        est=4.0,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -231,15 +282,22 @@ async def cb_open(update, context, feature, params):
 
 # ---- Dich vu ---------------------------------------------------------------- #
 async def cb_svc(update, context, service, params):
-    if not has_feature(update.effective_chat.id, C.F_SVC):
+    chat = update.effective_chat.id
+    if not has_feature(chat, C.F_SVC):
         return await update.callback_query.edit_message_text(texts.DENY, parse_mode=HTML)
-    state = await asyncio.to_thread(hostvn.svc_status, service)
-    ic = E["on"] if state == "active" else E["off"]
-    kb = menus.service_one_menu(service, can_write(update.effective_chat.id))
-    await update.callback_query.edit_message_text(
-        title(E["svc"], service, f"Trạng thái: <b>{texts.esc(state)}</b> {ic}"),
-        parse_mode=HTML, reply_markup=kb,
-    )
+
+    def render(state):
+        ic = E["on"] if state == "active" else E["off"]
+        return (title(E["svc"], service, f"Trạng thái: <b>{texts.esc(state)}</b> {ic}"),
+                menus.service_one_menu(service, can_write(chat)))
+
+    await _progress_op(update, True, f"⏳ <b>Đang kiểm tra</b> {texts.esc(service)}…",
+                       asyncio.to_thread(hostvn.svc_status, service), render, est=3.0)
+
+
+def _svc_act_then_status(act: str, service: str) -> str:
+    hostvn.svc(act, service)
+    return hostvn.svc_status(service)
 
 
 async def cb_do(update, context, service, params):
@@ -248,14 +306,20 @@ async def cb_do(update, context, service, params):
     if not can_write(update.effective_chat.id):
         return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
                                          reply_markup=menus.back_only("m|svc"))
-    await q.edit_message_text(title(E["refresh"], f"{act} {service}", "Đang xử lý..."),
-                              parse_mode=HTML)
-    await asyncio.to_thread(hostvn.svc, act, service)
-    state = await asyncio.to_thread(hostvn.svc_status, service)
-    ic = E["on"] if state == "active" else E["off"]
-    await q.edit_message_text(
-        title(E["confirm"], f"{act} {service}", f"Trạng thái: <b>{texts.esc(state)}</b> {ic}"),
-        parse_mode=HTML, reply_markup=menus.service_one_menu(service, True),
+
+    def render(state):
+        ic = E["on"] if state == "active" else E["off"]
+        return (title(E["confirm"], f"{act} {service}",
+                      f"Trạng thái: <b>{texts.esc(state)}</b> {ic}"),
+                menus.service_one_menu(service, True))
+
+    await _progress_op(
+        update, True,
+        f"{E['refresh']} <b>Đang {texts.esc(act)}</b> {texts.esc(service)}…",
+        asyncio.to_thread(_svc_act_then_status, act, service),
+        render, est=5.0,
+        stages=[(45, f"{E['refresh']} <b>Đang khởi động lại</b> {texts.esc(service)}…"),
+                (80, f"{E['refresh']} <b>Đang kiểm tra trạng thái</b>…")],
     )
 
 
@@ -277,30 +341,35 @@ async def cb_action(update, context, action, params):
         return await start_flow(update, context, "db_add", "m|db",
                                 E["db"], "Tạo database",
                                 "Nhập <b>tên database</b> (chỉ chữ/số/gạch dưới):")
-    if action == "dom_info":
-        doms = await asyncio.to_thread(hostvn.list_domains)
-        return await q.edit_message_text(
-            title(E["domain"], "Chọn domain", "Xem thông tin:"),
-            parse_mode=HTML, reply_markup=menus.picker_menu("dominfo", doms, E["domain"], "m|domain"))
-    if action == "dom_del":
-        doms = await asyncio.to_thread(hostvn.list_domains)
-        return await q.edit_message_text(
-            title(E["del"], "Xoá domain", "Chọn domain để XOÁ:"),
-            parse_mode=HTML, reply_markup=menus.picker_menu("domdel", doms, E["domain"], "m|domain"))
-    if action == "db_del":
-        dbs = await asyncio.to_thread(hostvn.list_dbs)
-        return await q.edit_message_text(
-            title(E["del"], "Xoá database", "Chọn DB để XOÁ:"),
-            parse_mode=HTML, reply_markup=menus.picker_menu("dbdel", dbs, E["db"], "m|db"))
-    if action == "wp_cache":
-        doms = await asyncio.to_thread(hostvn.list_domains)
-        return await q.edit_message_text(
-            title(E["wp"], "Xoá cache WP", "Chọn site:"),
-            parse_mode=HTML, reply_markup=menus.picker_menu("wpcache", doms, E["wp"], "m|wp"))
+    # ----- Cac picker (tai danh sach) -----
+    PICKERS = {
+        "dom_info": (hostvn.list_domains, "dominfo", E["domain"], "m|domain",
+                     (E["domain"], "Chọn domain", "Xem thông tin:")),
+        "dom_del":  (hostvn.list_domains, "domdel", E["domain"], "m|domain",
+                     (E["del"], "Xoá domain", "Chọn domain để XOÁ:")),
+        "db_del":   (hostvn.list_dbs, "dbdel", E["db"], "m|db",
+                     (E["del"], "Xoá database", "Chọn DB để XOÁ:")),
+        "wp_cache": (hostvn.list_domains, "wpcache", E["wp"], "m|wp",
+                     (E["wp"], "Xoá cache WP", "Chọn site:")),
+    }
+    if action in PICKERS:
+        loader, pick_act, emo, back, (t_emo, t_head, t_hint) = PICKERS[action]
+        return await _progress_op(
+            update, True, "⏳ <b>Đang tải danh sách…</b>",
+            asyncio.to_thread(loader),
+            lambda items: (title(t_emo, t_head, t_hint),
+                           menus.picker_menu(pick_act, items, emo, back)),
+            est=3.0,
+        )
 
     # ----- Cac hanh dong tra ket qua -----
-    text, back = await asyncio.to_thread(_run_action, action, chat)
-    await q.edit_message_text(text, parse_mode=HTML, reply_markup=menus.back_only(back))
+    await _progress_op(
+        update, True, "⏳ <b>Đang xử lý…</b>",
+        asyncio.to_thread(_run_action, action, chat),
+        lambda r: (r[0], menus.back_only(r[1])),
+        est=6.0,
+        stages=[(60, "⚙️ <b>Đang thu thập dữ liệu…</b>")],
+    )
 
 
 def _run_action(action: str, chat: int):
@@ -355,16 +424,19 @@ async def cb_pick(update, context, action, params):
     target = params[0] if params else ""
 
     if action == "dominfo":
-        text = await asyncio.to_thread(_domain_info, target)
-        return await q.edit_message_text(text, parse_mode=HTML, reply_markup=menus.back_only("m|domain"))
+        return await _progress_op(
+            update, True, f"⏳ <b>Đang đọc</b> {texts.esc(target)}…",
+            asyncio.to_thread(_domain_info, target),
+            lambda t: (t, menus.back_only("m|domain")), est=5.0)
     if action == "wpcache":
         if not can_write(chat):
             return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
                                              reply_markup=menus.back_only("m|wp"))
-        await asyncio.to_thread(_wp_cache_flush, target)
-        return await q.edit_message_text(
-            title(E["wp"], target, "Đã xoá cache WordPress (nếu có)."),
-            parse_mode=HTML, reply_markup=menus.back_only("m|wp"))
+        return await _progress_op(
+            update, True, f"{E['cache']} <b>Đang xoá cache</b> {texts.esc(target)}…",
+            asyncio.to_thread(_wp_cache_flush, target),
+            lambda _: (title(E["wp"], target, "Đã xoá cache WordPress (nếu có)."),
+                       menus.back_only("m|wp")), est=6.0)
     if action == "domdel":
         if not can_write(chat):
             return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
@@ -405,13 +477,31 @@ async def cb_nd(update, context, typ, params):
     if not can_write(chat):
         return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
                                          reply_markup=menus.back_only("m|domain"))
-    eta = "~30-60s" if typ == "wp" else "~15s"
-    kind = "WordPress" if typ == "wp" else "website PHP"
-    await q.edit_message_text(
-        title(E["domain"], f"Đang tạo {kind}", f"<b>{texts.esc(domain)}</b> ({eta})..."),
-        parse_mode=HTML)
-    ok, info, err = await asyncio.to_thread(hostvn.create_domain, typ, domain)
-    if ok:
+    is_wp = typ == "wp"
+    kind = "WordPress" if is_wp else "website PHP"
+    base = f"{E['domain']} <b>Đang tạo {kind}</b> {texts.esc(domain)}…"
+    if is_wp:
+        est = 40.0
+        stages = [
+            (12, f"{E['domain']} <b>Tạo user &amp; thư mục</b> {texts.esc(domain)}…"),
+            (32, f"{E['db']} <b>Tạo database &amp; user MySQL</b>…"),
+            (52, f"{E['wp']} <b>Đang tải mã nguồn WordPress</b>…"),
+            (76, f"{E['wp']} <b>Đang cài đặt WordPress</b>…"),
+            (90, f"{E['refresh']} <b>Tạo vHost &amp; reload nginx</b>…"),
+        ]
+    else:
+        est = 14.0
+        stages = [
+            (25, f"{E['domain']} <b>Tạo user &amp; thư mục</b>…"),
+            (55, f"{E['php']} <b>Cấu hình PHP-FPM pool</b>…"),
+            (82, f"{E['refresh']} <b>Tạo vHost &amp; reload nginx</b>…"),
+        ]
+
+    def render(res):
+        ok, info, err = res
+        if not ok:
+            return (title(E["warn"], f"Chưa tạo được {domain}", pre(err)),
+                    menus.back_only("m|domain"))
         lines = [f"Docroot   : {info['docroot']}",
                  f"SFTP user : {info['sftp_user']}",
                  f"SFTP pass : {info['sftp_pass']}"]
@@ -423,11 +513,14 @@ async def cb_nd(update, context, typ, params):
             lines += [f"WP admin  : {info['wp_user']}",
                       f"WP pass   : {info['wp_pass']}",
                       f"WP login  : http://{domain}/wp-admin"]
-        text = title(E["confirm"], f"Đã tạo {domain}", pre("\n".join(lines)) +
-                     "\n⚠️ <b>Lưu lại thông tin này!</b>")
-    else:
-        text = title(E["warn"], f"Chưa tạo được {domain}", pre(err))
-    await q.edit_message_text(text, parse_mode=HTML, reply_markup=menus.back_only("m|domain"))
+        return (title(E["confirm"], f"Đã tạo {domain}",
+                      f"<code>{progress.bar(100)}</code>\n" + pre("\n".join(lines)) +
+                      "\n⚠️ <b>Lưu lại thông tin này!</b>"),
+                menus.back_only("m|domain"))
+
+    await _progress_op(update, True, base,
+                       asyncio.to_thread(hostvn.create_domain, typ, domain),
+                       render, est=est, stages=stages)
 
 
 # ---- Xac nhan thao tac nguy hiem (cf / yes) --------------------------------- #
@@ -455,25 +548,46 @@ async def cb_yes(update, context, what, params):
     param = params[0] if params else ""
 
     if what == "restartall":
-        await q.edit_message_text(title(E["refresh"], "Đang restart...", ""), parse_mode=HTML)
-        msg = await asyncio.to_thread(hostvn.restart_stack)
-        return await q.edit_message_text(title(E["confirm"], "Xong", msg),
-                                         parse_mode=HTML, reply_markup=menus.back_only("m|vps"))
+        return await _progress_op(
+            update, True, f"{E['refresh']} <b>Đang restart toàn bộ dịch vụ</b>…",
+            asyncio.to_thread(hostvn.restart_stack),
+            lambda msg: (title(E["confirm"], "Hoàn tất",
+                               f"<code>{progress.bar(100)}</code>\n{msg}"),
+                         menus.back_only("m|vps")),
+            est=12.0,
+            stages=[(30, f"{E['db']} <b>Đang restart MariaDB</b>…"),
+                    (60, f"{E['php']} <b>Đang restart PHP-FPM</b>…"),
+                    (85, f"{E['svc']} <b>Đang restart Nginx</b>…")],
+        )
     if what == "reboot":
-        await q.edit_message_text(title(E["reboot"], "Server đang reboot...", ""), parse_mode=HTML)
+        await q.edit_message_text(
+            title(E["reboot"], "Server đang reboot…",
+                  f"<code>{progress.bar(100)}</code>\nBot sẽ tự chạy lại sau khi khởi động."),
+            parse_mode=HTML)
         await asyncio.to_thread(hostvn.reboot)
         return
     if what == "domdel":
-        await q.edit_message_text(title(E["refresh"], f"Đang xoá {param}...", ""), parse_mode=HTML)
-        ok = await asyncio.to_thread(hostvn.delete_domain, param)
-        text = (title(E["confirm"], "Đã xoá domain", texts.esc(param)) if ok
-                else title(E["warn"], "Không xoá được", texts.esc(param)))
-        return await q.edit_message_text(text, parse_mode=HTML, reply_markup=menus.back_only("m|domain"))
+        return await _progress_op(
+            update, True, f"{E['del']} <b>Đang xoá domain</b> {texts.esc(param)}…",
+            asyncio.to_thread(hostvn.delete_domain, param),
+            lambda ok: ((title(E["confirm"], "Đã xoá domain",
+                               f"<code>{progress.bar(100)}</code>\n{texts.esc(param)}") if ok
+                         else title(E["warn"], "Không xoá được", texts.esc(param))),
+                        menus.back_only("m|domain")),
+            est=10.0,
+            stages=[(40, f"{E['del']} <b>Xoá vHost &amp; PHP pool</b>…"),
+                    (70, f"{E['del']} <b>Xoá user, thư mục &amp; database</b>…")],
+        )
     if what == "dbdel":
-        ok = await asyncio.to_thread(hostvn.delete_db, param)
-        text = (title(E["confirm"], "Đã xoá database", texts.esc(param)) if ok
-                else title(E["warn"], "Không xoá được", texts.esc(param)))
-        return await q.edit_message_text(text, parse_mode=HTML, reply_markup=menus.back_only("m|db"))
+        return await _progress_op(
+            update, True, f"{E['del']} <b>Đang xoá database</b> {texts.esc(param)}…",
+            asyncio.to_thread(hostvn.delete_db, param),
+            lambda ok: ((title(E["confirm"], "Đã xoá database",
+                               f"<code>{progress.bar(100)}</code>\n{texts.esc(param)}") if ok
+                         else title(E["warn"], "Không xoá được", texts.esc(param))),
+                        menus.back_only("m|db")),
+            est=5.0,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -493,17 +607,23 @@ async def handle_flow(update, context, flow, text):
     chat = update.effective_chat.id
 
     if flow == "db_add":
-        ok, err, info = await asyncio.to_thread(hostvn.create_db, text)
+        editor = await _make_editor(update, False)
+        ok, err, info = await progress.run(
+            editor, f"{E['db']} <b>Đang tạo database</b> {texts.esc(text)}…",
+            asyncio.to_thread(hostvn.create_db, text), est=6.0,
+            stages=[(50, f"{E['db']} <b>Tạo user &amp; cấp quyền</b>…")])
         if info:
             body = (f"DB   : {info['db']}\nUser : {info['user']}\n"
                     f"Pass : {info['pass']}\nHost : {info['host']}")
+            await editor(title(E["confirm"], "Đã tạo database",
+                               f"<code>{progress.bar(100)}</code>\n" + pre(body) +
+                               "\n⚠️ <b>Lưu lại!</b>"))
+            context.user_data.pop("flow", None)
             await update.message.reply_text(
-                title(E["confirm"], "Đã tạo database", pre(body) + "\n⚠️ <b>Lưu lại!</b>"),
+                title(E["home"], "Menu chính", "Chọn chức năng từ <b>menu bên dưới</b>."),
                 parse_mode=HTML, reply_markup=menus.build_keyboard(_features(chat)))
         else:
-            return await update.message.reply_text(f"{E['warn']} {err} Nhập lại hoặc ❌ Hủy.",
-                                                   parse_mode=HTML)
-        context.user_data.pop("flow", None)
+            await editor(f"{E['warn']} {err} Nhập lại hoặc bấm ❌ Hủy.")
         return
 
     if flow == "dom_add":
