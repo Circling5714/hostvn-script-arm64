@@ -78,12 +78,45 @@ def confirm_menu(what: str, *params: str, back: str = C.CB_HOME) -> InlineKeyboa
 # SUB-MENU tinh (callback "<mien>|<hanh_dong>")
 # --------------------------------------------------------------------------- #
 def domain_menu() -> InlineKeyboardMarkup:
+    """Mirror menu '1. Quan ly ten mien' (13 muc) cua shell hostvn."""
     return rows_menu([
-        [(f"{C.E['list']} Danh sách domain", "a|dom_list")],
-        [(f"{C.E['add']} Thêm domain", "a|dom_add")],
-        [(f"{C.E['info']} Thông tin domain", "a|dom_info")],
-        [(f"{C.E['del']} Xoá domain", "a|dom_del")],
+        [(f"{C.E['list']} Danh sách domain", "a|dom_list"),
+         (f"{C.E['info']} Thông tin domain", "a|dom_info")],
+        [(f"{C.E['add']} Thêm domain", "a|dom_add"),
+         (f"{C.E['del']} Xoá domain", "a|dom_del")],
+        [("✏️ Đổi tên miền", "a|dom_rename"),
+         ("🧬 Clone website", "a|dom_clone")],
+        [("🧱 Rewrite vHost", "a|dom_rewrite"),
+         (f"{C.E['php']} Đổi phiên bản PHP", "a|dom_php")],
+        [("🔗 Alias/Parked", "a|dom_alias"),
+         ("↪️ Redirect", "a|dom_redirect")],
+        [(f"{C.E['key']} Đổi mật khẩu SFTP", "a|dom_sftp"),
+         ("🔐 Bảo vệ thư mục", "a|dom_protect")],
+        [("🚀 Bật/Tắt HTTP/3", "a|dom_http3"),
+         (f"{C.E['db']} Đổi thông tin DB", "a|dom_dbinfo")],
     ])
+
+
+def onoff_menu(domain: str, act: str, back: str = "m|domain") -> InlineKeyboardMarkup:
+    """Bat/Tat cho 1 domain -> dm|<act>on|<domain> / dm|<act>off|<domain>."""
+    return rows_menu([
+        [(f"{C.E['on']} Bật", f"dm|{act}on|{domain}"),
+         (f"{C.E['off']} Tắt", f"dm|{act}off|{domain}")],
+    ], back=back)
+
+
+def php_choice_menu(domain: str, versions: list[str], back: str = "m|domain") -> InlineKeyboardMarkup:
+    """Chon phien ban PHP -> dm|php|<domain>|<lua_chon 1|2>."""
+    rows = [[(f"{C.E['php']} PHP {v}", f"dm|php|{domain}|{i + 1}")]
+            for i, v in enumerate(versions[:2])]
+    return rows_menu(rows, back=back)
+
+
+def source_menu(domain: str, back: str = "m|domain") -> InlineKeyboardMarkup:
+    """Chon loai ma nguon khi rewrite vHost -> dm|rw|<domain>|<source_idx>."""
+    common = [("WordPress", 1), ("Laravel", 2), ("Nodejs", 8), ("Khác/Static", 20)]
+    rows = [[(f"📦 {name}", f"dm|rw|{domain}|{i}")] for name, i in common]
+    return rows_menu(rows, back=back)
 
 
 def db_menu() -> InlineKeyboardMarkup:

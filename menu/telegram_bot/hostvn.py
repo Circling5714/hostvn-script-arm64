@@ -354,6 +354,168 @@ def reboot() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Quan ly domain nang cao - drive controller hostvn bang canned input.
+# _select_domain liet ke tu glob ".*.conf" trong /var/hostvn/users -> domain_index()
+# chay DUNG doan glob do de lay so thu tu, khong doan mo.
+# --------------------------------------------------------------------------- #
+CTL = "/var/hostvn/menu/controller/domain"
+
+
+def domain_index(domain: str) -> int:
+    """So thu tu (1-based) cua domain trong menu _select_domain. 0 = khong thay."""
+    out = sh('cd /var/hostvn/users 2>/dev/null && for f in .*.conf; do '
+             'd=${f#.}; d=${d%.conf}; [ "$d" != "*" ] && printf "%s\\n" "$d"; done', 15)
+    doms = [x.strip() for x in out.splitlines() if x.strip()]
+    return doms.index(domain) + 1 if domain in doms else 0
+
+
+def _need_index(domain: str) -> tuple[int, str]:
+    idx = domain_index(domain)
+    return idx, ("" if idx else "Không tìm thấy domain trong danh sách hostvn.")
+
+
+def _has_quic(domain: str) -> bool:
+    conf = Path(C.VHOST_DIR) / f"{domain}.conf"
+    return "quic" in conf.read_text(errors="replace").lower() if conf.exists() else False
+
+
+def _ctl_reason(out: str, fallback: str) -> str:
+    """Lay dong thong bao co nghia cuoi cung tu output controller."""
+    skip = ("Nhap vao lua chon", "1)", "2)", "3)", "Danh sach")
+    lines = [l.strip() for l in out.splitlines() if l.strip()]
+    for l in reversed(lines):
+        if not any(l.startswith(s) for s in skip) and len(l) > 12:
+            return l[:220]
+    return fallback
+
+
+def dom_http3(domain: str, enable: bool) -> tuple[bool, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    before = _has_quic(domain)
+    if before == enable:
+        # KHONG bao thanh cong gia: noi ro la von da o trang thai nay
+        return True, (f"HTTP/3 vốn đã <b>{'bật' if enable else 'tắt'}</b> sẵn cho {domain} "
+                      f"— không có gì thay đổi.")
+    out = run_ctl(f"{1 if enable else 2}\n{idx}", f"{CTL}/http3", 120)
+    if _has_quic(domain) == enable:
+        svc("reload", "nginx")
+        return True, f"Đã {'bật' if enable else 'tắt'} HTTP/3 cho {domain}."
+    reason = _ctl_reason(out, "Không đổi được HTTP/3.")
+    if "ssl" in reason.lower():
+        reason += "\n\n<i>HTTP/3 yêu cầu SSL cấu hình trực tiếp trên nginx. Site chạy qua Cloudflare Tunnel thường không có SSL local nên không bật được.</i>"
+    return False, reason
+
+
+def dom_change_sftp_pass(domain: str, newpass: str = "") -> tuple[bool, str, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err, ""
+    pw = newpass or genpw(14)
+    if len(pw) < 8:
+        return False, "Mật khẩu phải từ 8 ký tự.", ""
+    out = run_ctl(f"{idx}\n{pw}", f"{CTL}/change_pass_sftp", 120)
+    low = out.lower()
+    if "thanh cong" in low or "success" in low:
+        return True, f"Đã đổi mật khẩu SFTP cho {domain}.", pw
+    return False, (out.strip().splitlines() or ["Không đổi được mật khẩu."])[-1][:200], ""
+
+
+def dom_rewrite_config(domain: str, source_idx: int) -> tuple[bool, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    out = run_ctl(f"{idx}\n{source_idx}", f"{CTL}/rewrite_config", 180)
+    ok = sh("nginx -t 2>&1 | tail -1", 30)
+    if "successful" in ok:
+        svc("reload", "nginx")
+        return True, f"Đã tạo lại vHost cho {domain}. nginx: OK."
+    return False, f"nginx test lỗi: {ok[:180]}"
+
+
+def dom_change_php(domain: str, choice: int) -> tuple[bool, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    out = run_ctl(f"{idx}\n{choice}", f"{CTL}/change_php_version", 180)
+    return True, (out.strip().splitlines() or ["Đã gửi yêu cầu đổi phiên bản PHP."])[-1][:200]
+
+
+def dom_rename(domain: str, new_domain: str) -> tuple[bool, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    nd = new_domain.strip().lower()
+    if nd.startswith("www."):
+        nd = nd[4:]
+    if not DOMAIN_RE.match(nd):
+        return False, "Tên miền mới không hợp lệ."
+    if (Path(C.VHOST_DIR) / f"{nd}.conf").exists():
+        return False, f"Domain {nd} đã tồn tại."
+    run_ctl(f"{idx}\n{nd}", f"{CTL}/change_domain", 180)
+    if (Path(C.VHOST_DIR) / f"{nd}.conf").exists():
+        return True, f"Đã đổi {domain} → {nd}."
+    return False, "Đổi tên miền không thành công."
+
+
+def dom_alias_add(domain: str, alias: str, source_idx: int = 20) -> tuple[bool, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    al = alias.strip().lower()
+    if al.startswith("www."):
+        al = al[4:]
+    if not DOMAIN_RE.match(al):
+        return False, "Domain alias không hợp lệ."
+    out = run_ctl(f"1\n{idx}\n{al}\n{source_idx}", f"{CTL}/alias_domain", 180)
+    conf = Path(C.VHOST_DIR) / f"{domain}.conf"
+    txt = conf.read_text(errors="replace") if conf.exists() else ""
+    if al in txt or (Path("/etc/nginx/alias") / f"{al}.conf").exists():
+        svc("reload", "nginx")
+        return True, f"Đã thêm alias {al} → {domain}."
+    return False, _ctl_reason(out, "Không thêm được alias.")
+
+
+def dom_redirect_add(domain: str, target: str) -> tuple[bool, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    rd = target.strip().lower()
+    if rd.startswith("www."):
+        rd = rd[4:]
+    if not DOMAIN_RE.match(rd):
+        return False, "Domain redirect không hợp lệ."
+    out = run_ctl(f"1\n{idx}\n{rd}", f"{CTL}/redirect_domain", 180)
+    if (Path("/etc/nginx/redirect") / f"{rd}.conf").exists():
+        svc("reload", "nginx")
+        return True, f"Đã thêm redirect {rd} → {domain}."
+    return False, _ctl_reason(out, "Không thêm được redirect.")
+
+
+def dom_protect_dir(domain: str, path: str, user: str, password: str) -> tuple[bool, str]:
+    idx, err = _need_index(domain)
+    if err:
+        return False, err
+    p = path.strip()
+    if not p.startswith("/"):
+        p = "/" + p
+    if not user or len(password) < 6:
+        return False, "Cần user và mật khẩu tối thiểu 6 ký tự."
+    run_ctl(f"{idx}\n1\n{p}\n{user}\n{password}", f"{CTL}/protect_dir", 180)
+    ok = sh("nginx -t 2>&1 | tail -1", 30)
+    if "successful" in ok:
+        svc("reload", "nginx")
+        return True, f"Đã bảo vệ thư mục {p} của {domain} (user: {user})."
+    return False, f"nginx test lỗi: {ok[:180]}"
+
+
+def php_versions() -> list[str]:
+    out = sh("ls /etc/php 2>/dev/null", 10)
+    return sorted(x for x in out.split() if x[:1].isdigit())
+
+
+# --------------------------------------------------------------------------- #
 # Backup / Restore  (giu DUNG format cua shell hostvn de restore cheo duoc:
 #   /home/backup/<YYYY-MM-DD>/<domain>/<domain>.tar.gz  +  <db_name>.sql.gz )
 # --------------------------------------------------------------------------- #
