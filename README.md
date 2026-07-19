@@ -85,8 +85,22 @@ và khởi động qua lớp `_svc` nên hoạt động ở cả systemd lẫn A
 thao tác đều có **thanh tiến trình động**; thao tác nguy hiểm có bước xác nhận;
 những luồng cần nhập nhiều dữ liệu được hướng dẫn làm qua SSH thay vì giả lập.
 
+Sao lưu thẳng lên cloud ngay trên bot (máy chủ / Google Drive / OneDrive / S3),
+khôi phục cũng lấy được bản trên cloud. Phân quyền xét theo **người bấm** chứ
+không theo phòng chat, nên thêm bot vào nhóm thì thành viên khác vẫn không
+điều khiển được server.
+
 Cài đặt: `hostvn` → **13. Công cụ → 8. Enable/Disable Telegram notify →
 5. Telegram Bot điều khiển server**.
+
+Điều khiển bot bằng một dòng lệnh:
+
+```bash
+hostvn-bot restart | start | stop | status | log [số_dòng]
+```
+
+> Sau khi cập nhật mã nguồn bot **phải restart** — Python nạp module một lần
+> lúc khởi chạy, không đọc lại file trên đĩa.
 
 Bảo mật: whitelist Chat ID bắt buộc, chế độ chỉ xem `notify` và chế độ điều khiển
 `menu` (tên cũ `shell` vẫn nhận để tương thích, nhưng backend Python **không**
