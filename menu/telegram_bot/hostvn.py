@@ -25,9 +25,48 @@ def _env() -> dict[str, str]:
     return {**os.environ, "PATH": C.PATH_ENV, "DEBIAN_FRONTEND": "noninteractive", "TERM": "dumb"}
 
 
+# Ban ARM64 co lop truu tuong _svc trong menu/helpers/environment (vi khong co systemd).
+# Ban x86 chay systemd nen KHONG can lop do; bot tu cap mot _svc toi gian anh xa sang
+# systemctl de phan con lai cua code dung chung khong phai biet minh dang o dau.
+_SVC_SHIM = r'''
+_svc_unit() {
+    # mot vai ten khac nhau giua cac ban phan phoi
+    case "$1" in
+        redis) systemctl list-unit-files redis.service >/dev/null 2>&1 \
+                 && echo redis || echo redis-server ;;
+        *) echo "$1" ;;
+    esac
+}
+_svc() {
+    local action="$1" svc state; svc="$(_svc_unit "$2")"
+    case "${action}" in
+        is-active)
+            # systemctl da IN trang thai roi ke ca khi thoat khac 0 ("inactive",
+            # "failed"...). Chi tu dat "inactive" khi no khong in gi (unit khong ton tai),
+            # neu khong se in trung hai lan.
+            state="$(systemctl is-active "${svc}" 2>/dev/null)"
+            [ -n "${state}" ] || state="inactive"
+            echo "${state}"
+            [ "${state}" = "active" ] || return 3
+            ;;
+        enable|disable|daemon-reload) systemctl "${action}" "${svc}" >/dev/null 2>&1 ;;
+        *) systemctl "${action}" "${svc}" >/dev/null 2>&1 ;;
+    esac
+}
+_svc_active() { [ "$(systemctl is-active "$(_svc_unit "$1")" 2>/dev/null)" = "active" ]; }
+'''
+
+
+def _env_prefix() -> str:
+    """Nap _svc: dung lop cua HostVN neu co, khong thi dung shim systemctl."""
+    if Path(C.ENVIRONMENT).exists():
+        return f"source {C.ENVIRONMENT} 2>/dev/null; "
+    return _SVC_SHIM + "\n"
+
+
 def sh(script: str, timeout: int = 40, source_env: bool = False, merge: bool = False) -> str:
-    """Chay 'bash -c script'. source_env: nap menu/helpers/environment (co _svc)."""
-    prefix = f"source {C.ENVIRONMENT} 2>/dev/null; " if source_env else ""
+    """Chay 'bash -c script'. source_env: nap lop dieu khien service (_svc)."""
+    prefix = _env_prefix() if source_env else ""
     try:
         p = subprocess.run(
             ["bash", "-c", prefix + script],
@@ -198,9 +237,9 @@ def _php_choice_answer() -> str:
     """Cau tra loi cho buoc chon phien ban PHP cua add_domain — hoac chuoi rong.
 
     add_domain CHI hoi phien ban PHP khi may cai 2 ban PHP (php2_release=yes).
-    Nhoi san mot dong tra loi ma may khong hoi (hoac nguoc lai) thi TOAN BO cac
-    cau tra loi phia sau lech mot nhip: site tao ra thieu database va thieu ma
-    nguon. Phai do cau hinh THUC TE cua may chu khong gia dinh.
+    Neu cu nhoi san mot dong tra loi ma may khong hoi (hoac nguoc lai), toan bo
+    cac cau tra loi sau se lech mot nhip: site tao ra thieu database va thieu
+    ma nguon. Vi vay phai do cau hinh THUC TE cua may.
     """
     return "1\n" if conf_val("php2_release") == "yes" else ""
 
@@ -777,8 +816,9 @@ def pkg_service(name: str, install: bool) -> tuple[bool, str]:
 
 # --------------------------------------------------------------------------- #
 # Firewall (mirror menu "5. Quan ly Firewall")
-# Luu y moi truong Android/chroot: KHONG co iptables/ufw, fail2ban chay banaction
-# 'hostvn-noop' -> chi PHAT HIEN chu khong chan. Chan that phai lam o Cloudflare WAF.
+# fw_backend() do thuc te chu khong gia dinh: may x86 binh thuong co iptables/ufw,
+# nhung container LXC/Docker thieu NET_ADMIN thi khong -> khi do fail2ban chi PHAT
+# HIEN, phai chan that o Cloudflare WAF.
 # --------------------------------------------------------------------------- #
 FWCTL = "/var/hostvn/menu/controller/firewall"
 CF_WAF_CONF = "/var/hostvn/.cf_waf.conf"
@@ -1008,8 +1048,11 @@ def conf_val(key: str, path: str = C.FILE_INFO) -> str:
     return m.group(1).strip().strip("\"'") if m else ""
 
 
-def backup_site(domain: str, btype: str = "full") -> tuple[bool, str, str]:
-    """btype: full | source | db. Tra (ok, thong_bao, thu_muc_dich)."""
+def backup_site(domain: str, btype: str = "full", remote: str = "") -> tuple[bool, str, str]:
+    """btype: full | source | db. remote rong = chi luu tren may.
+
+    Tra (ok, thong_bao, thu_muc_dich).
+    """
     uc = read_user_conf(domain)
     user, db = uc.get("username", ""), uc.get("db_name", "")
     if not user:
@@ -1061,7 +1104,79 @@ if [ -n "$MOVED" ] && [ -f public_html/wp-config.php ]; then rm -f public_html/w
                 return False, "Dump database thất bại.", dest
 
     size = sh(f"du -sh {qdest} 2>/dev/null | cut -f1", 20)
-    return True, f"Đã backup {', '.join(done)} ({size}).", dest
+    if not remote:
+        return True, f"Đã backup {', '.join(done)} ({size}) — lưu trên máy.", dest
+
+    ok, msg = _upload_backup(remote, date, domain, dest)
+    if not ok:
+        # Giu lai ban tren may de khong mat du lieu khi day len that bai
+        return False, f"Đã backup {', '.join(done)} ({size}) nhưng {msg}", dest
+    sh(f"rm -rf {qdest}", 60)
+    return True, f"Đã backup {', '.join(done)} ({size}) và đẩy lên <b>{remote}</b>.", dest
+
+
+def _upload_backup(remote: str, date: str, domain: str, dest: str) -> tuple[bool, str]:
+    """Day thu muc backup len remote + ghi so muc luc (dung ham cua shell).
+
+    Tai sao goi lai ham shell thay vi viet lai: so muc luc phai GIONG HET ban
+    shell ghi, neu khong thi backup tu bot se khong hien khi restore tu shell
+    va nguoc lai.
+    """
+    ip = sh("source /var/hostvn/ipaddress 2>/dev/null; echo $IPADDRESS", 10).strip()
+    if not ip:
+        ip = sh("hostname -I | awk '{print $1}'", 10).strip()
+    qr, qip = shlex.quote(remote), shlex.quote(ip)
+    qd, qdest = shlex.quote(domain), shlex.quote(dest)
+    qdate = shlex.quote(date)
+
+    # Day TUNG FILE bang copyto thay vi "rclone copy" ca thu muc. Ly do: co
+    # gateway S3 chi cho ghi MOT LAN vao mot duong dan — backup lai cung domain
+    # trong cung ngay se bao "is a file not a directory". Xoa truoc roi ghi lai
+    # thi duoc, nhung xoa ca thu muc lai can liet ke (cung khong duoc ho tro),
+    # nen phai xu ly theo tung file ma minh biet ten.
+    files = sorted(p.name for p in Path(dest).iterdir() if p.is_file())
+    if not files:
+        return False, "không có file nào để đẩy lên."
+
+    def _push(folder: str) -> tuple[int, str]:
+        ok_n, err = 0, ""
+        qfolder = shlex.quote(folder)
+        for f in files:
+            qf = shlex.quote(f)
+            sh(f"rclone deletefile {qr}:{qip}/{qfolder}/{qd}/{qf} >/dev/null 2>&1", 120)
+            out = sh(f"rclone copyto {qdest}/{qf} {qr}:{qip}/{qfolder}/{qd}/{qf} "
+                     f"--bwlimit 30M 2>&1; echo RC=$?", 1800, merge=True)
+            if "RC=0" in out:
+                ok_n += 1
+            else:
+                err = "\n".join(out.strip().splitlines()[-2:])
+        return ok_n, err
+
+    folder = date
+    sent, last_err = _push(folder)
+    if sent < len(files):
+        # Co gateway chi cho ghi MOT LAN vao mot duong dan: backup lai cung
+        # domain trong cung ngay se bi tu choi, xoa truoc cung khong an thua.
+        # Ghi vao thu muc moi (<ngay>_<gio>) — duong dan moi thi luon ghi duoc.
+        # So muc luc ghi lai dung thu muc da dung nen restore van tim thay.
+        folder = f"{date}_{time.strftime('%H%M%S')}"
+        sent, last_err = _push(folder)
+    if sent == 0:
+        return False, f"đẩy lên {remote} thất bại: {last_err}"
+    if sent < len(files):
+        return False, f"chỉ đẩy được {sent}/{len(files)} file lên {remote}: {last_err}"
+    qdate = shlex.quote(folder)
+
+    # Xac minh bang cach DOC lai mot file theo duong dan chinh xac — khong dung
+    # liet ke, vi co gateway S3 khong ho tro liet ke theo prefix.
+    probe = files[0]
+    n = sh(f"rclone cat {qr}:{qip}/{qdate}/{qd}/{shlex.quote(probe)} 2>/dev/null | head -c 64 | wc -c", 300)
+    if n.strip() in ("", "0"):
+        return False, f"đã đẩy lên {remote} nhưng đọc lại không thấy dữ liệu"
+
+    sh(f"source /var/hostvn/menu/helpers/function 2>/dev/null; "
+       f"backup_index_add {qr} {qdate} {qd} {qdest}", 300, merge=True)
+    return True, ""
 
 
 def backup_dates(domain: str = "") -> list[str]:
@@ -1074,6 +1189,70 @@ def backup_dates(domain: str = "") -> list[str]:
         if not domain or (root / d / domain).is_dir():
             out.append(d)
     return out
+
+
+def _index_path(remote: str) -> Path:
+    return Path(f"/var/hostvn/.backup_index.{remote}")
+
+
+def cloud_backups(domain: str = "") -> list[tuple[str, str, str]]:
+    """Ban backup nam tren cloud, doc tu so muc luc: [(remote, ngay, domain)].
+
+    Doc SO MUC LUC chu khong liet ke remote: co gateway S3 khong ho tro liet ke
+    theo prefix nen "rclone lsf" luon tra ve rong du du lieu van con.
+    """
+    out: list[tuple[str, str, str]] = []
+    for r in rclone_remotes():
+        if r.endswith("-s3"):
+            continue
+        # Lay ban moi nhat tu remote ve roi doc
+        sh(f"source /var/hostvn/menu/helpers/function 2>/dev/null; "
+           f"backup_index_fetch {shlex.quote(r)}", 120)
+        idx = _index_path(r)
+        if not idx.exists():
+            continue
+        for line in idx.read_text(errors="replace").splitlines():
+            parts = line.split("|")
+            if len(parts) < 3:
+                continue
+            d, dom = parts[0].strip(), parts[1].strip()
+            if d and dom and (not domain or dom == domain):
+                out.append((r, d, dom))
+    # moi nhat len truoc, bo trung
+    return sorted(set(out), key=lambda x: x[1], reverse=True)
+
+
+def fetch_cloud_backup(remote: str, date: str, domain: str) -> tuple[bool, str]:
+    """Tai ban backup tu cloud ve /home/backup/<date>/<domain> de khoi phuc."""
+    idx = _index_path(remote)
+    files: list[str] = []
+    if idx.exists():
+        for line in idx.read_text(errors="replace").splitlines():
+            parts = line.split("|")
+            if len(parts) >= 3 and parts[0].strip() == date and parts[1].strip() == domain:
+                files = [f.strip() for f in parts[2].split(",") if f.strip()]
+                break
+    if not files:
+        # Khong co so muc luc: dung ten file theo quy uoc cua script
+        db = read_user_conf(domain).get("db_name", "")
+        files = [f"{domain}.tar.gz"] + ([f"{db}.sql.gz"] if db else [])
+
+    ip = sh("source /var/hostvn/ipaddress 2>/dev/null; echo $IPADDRESS", 10).strip() \
+         or sh("hostname -I | awk '{print $1}'", 10).strip()
+    dest = f"{BACKUP_ROOT}/{date}/{domain}"
+    sh(f"mkdir -p {shlex.quote(dest)}", 20)
+
+    got = 0
+    for f in files:
+        # copyto theo DUONG DAN CHINH XAC — khong dua vao liet ke
+        rc = sh(f"rclone copyto {shlex.quote(remote)}:{shlex.quote(ip)}/{shlex.quote(date)}/"
+                f"{shlex.quote(domain)}/{shlex.quote(f)} {shlex.quote(dest)}/{shlex.quote(f)} "
+                f"--bwlimit 30M >/dev/null 2>&1; echo $?", 1800)
+        if rc.strip() == "0" and Path(f"{dest}/{f}").exists():
+            got += 1
+    if got == 0:
+        return False, f"Không tải được file nào từ {remote}."
+    return True, f"Đã tải {got}/{len(files)} file từ {remote}."
 
 
 def list_backups() -> list[dict]:
@@ -1160,16 +1339,48 @@ chown -R {qu}:{qu} {qhome}
     return True, f"Đã khôi phục {', '.join(done)} cho {domain}."
 
 
-def rclone_remotes() -> list[str]:
+def rclone_remotes(include_raw: bool = False) -> list[str]:
+    """Ten cac remote. Mac dinh AN remote tho "<ten>-s3".
+
+    Remote tho la phan ky thuat cua ket noi S3 (alias "<ten>" moi la cai tro
+    thang vao bucket). Hien no ra chi lam nguoi dung chon nham -> sai duong dan.
+    """
     out = sh("rclone listremotes 2>/dev/null", 15)
-    return [x.strip().rstrip(":") for x in out.splitlines() if x.strip()]
+    names = [x.strip().rstrip(":") for x in out.splitlines() if x.strip()]
+    if include_raw:
+        return names
+    return [n for n in names if not n.endswith("-s3")]
+
+
+def rclone_remotes_info() -> list[dict]:
+    """Remote kem loai va dich den, de hien cho nguoi dung doc duoc."""
+    info = []
+    for n in rclone_remotes():
+        qn = shlex.quote(n)
+        typ = sh(f"rclone config show {qn} 2>/dev/null | grep -m1 '^type' | cut -d= -f2", 15).strip()
+        tgt = sh(f"rclone config show {qn} 2>/dev/null | grep -m1 '^remote' | cut -d= -f2", 15).strip()
+        if typ == "alias" and tgt.split(":")[0].endswith("-s3"):
+            info.append({"name": n, "kind": "S3", "detail": f"bucket: {tgt.split(':', 1)[-1]}"})
+        else:
+            kinds = {"drive": "Google Drive", "onedrive": "OneDrive", "s3": "S3"}
+            info.append({"name": n, "kind": kinds.get(typ, typ or "?"), "detail": tgt})
+    return info
 
 
 def rclone_delete_remote(name: str) -> bool:
+    """Xoa ket noi: alias + remote tho "<ten>-s3" + so muc luc backup.
+
+    Chi xoa alias thi remote tho o lai mo coi trong rclone.conf — sau nay tao
+    lai cung ten se bao "da ton tai".
+    """
     if not name or "/" in name:
         return False
-    sh(f"rclone config delete {shlex.quote(name)}", 20, merge=True)
-    return name not in rclone_remotes()
+    qn = shlex.quote(name)
+    sh(f"rclone config delete {qn}", 20, merge=True)
+    if f"{name}-s3" in rclone_remotes(include_raw=True):
+        sh(f"rclone config delete {shlex.quote(name + '-s3')}", 20, merge=True)
+    sh(f"rm -f /var/hostvn/.backup_index.{qn}", 10)
+    return name not in rclone_remotes(include_raw=True)
 
 
 def autobackup_info() -> str:

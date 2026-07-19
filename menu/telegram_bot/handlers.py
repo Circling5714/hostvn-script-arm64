@@ -553,8 +553,8 @@ async def cb_action(update, context, action, params):
     if action == "cron_del":
         return await q.edit_message_text(
             title(E["warn"], "Xoá cronjob",
-                  "Xoá <b>toàn bộ</b> crontab của root (gồm cả lịch auto-backup và "
-                  "lịch đồng bộ DB tmpfs). Tiếp tục?"),
+                  "Xoá <b>toàn bộ</b> crontab của root, gồm cả lịch auto-backup và "
+                  "lịch gia hạn SSL (acme.sh). Tiếp tục?"),
             parse_mode=HTML, reply_markup=menus.confirm_menu("cronclr", back="m|cron"))
     if action in ("adm_pma", "adm_opc", "adm_redis", "adm_mc"):
         ctl = {"adm_pma": "update_phpmyadmin", "adm_opc": "opcache_panel",
@@ -598,14 +598,22 @@ async def cb_action(update, context, action, params):
                      for r in rows], "del")),
             est=4.0)
     if action == "bk_remotes":
+        def _render(info):
+            if not info:
+                return (title("☁️", "Remote đã kết nối",
+                              "Chưa kết nối cloud nào.\n\nDùng 🔗 <b>Kết nối GDrive / "
+                              "OneDrive / S3</b> ở menu Backup."),
+                        menus.remotes_menu([]))
+            body = "\n".join(f"{d['name']}  ·  {d['kind']}"
+                              + (f"\n    {d['detail']}" if d["detail"] else "")
+                              for d in info)
+            return (title("☁️", "Remote đã kết nối",
+                          pre(body) + "\nBấm tên để <b>xoá</b> kết nối."),
+                    menus.remotes_menu([d["name"] for d in info]))
+
         return await _progress_op(
             update, True, "⏳ <b>Đang đọc cấu hình rclone…</b>",
-            asyncio.to_thread(hostvn.rclone_remotes),
-            lambda rs: (title("☁️", "Remote đã kết nối",
-                              (pre("\n".join(rs)) + "\nBấm để <b>xoá</b> kết nối.") if rs
-                              else "Chưa kết nối remote nào."),
-                        menus.remotes_menu(rs)),
-            est=3.0)
+            asyncio.to_thread(hostvn.rclone_remotes_info), _render, est=6.0)
 
     # ----- Cac picker (tai danh sach) -----
     PICKERS = {
@@ -752,8 +760,8 @@ def _run_action(action: str, chat: int):
                 f"Cloudflare Tunnel : {'bật' if b['tunnel'] else 'tắt'}")
         note = ""
         if not b["iptables"] and not b["ufw"]:
-            note = ("\n\n⚠️ <b>Máy này không có iptables/ufw</b> (container Android). "
-                    "Fail2ban đang chạy action <code>hostvn-noop</code> nên chỉ "
+            note = ("\n\n⚠️ <b>Máy này không có iptables/ufw</b> (thường gặp ở container "
+                    "LXC/Docker không được cấp quyền NET_ADMIN). Fail2ban chỉ "
                     "<b>phát hiện</b> chứ không chặn được ở tầng máy.")
             if b["tunnel"]:
                 note += ("\n\nLưu lượng vào qua <b>Cloudflare Tunnel</b>, nên việc chặn thật "
@@ -774,9 +782,9 @@ def _run_action(action: str, chat: int):
             return (title("🔌", "Mở port / Bật-Tắt firewall",
                           "Máy này <b>không có iptables/ufw</b> nên các thao tác mở port, "
                           "bật/tắt firewall <b>không áp dụng được</b>.\n\n"
-                          "Cổng được kiểm soát ở hai nơi:\n"
-                          "• <b>Cloudflare</b> (lưu lượng vào qua Tunnel)\n"
-                          "• <b>Android</b> — máy không mở cổng ra Internet trực tiếp\n\n"
+                          "Hãy mở/đóng cổng ở lớp bên ngoài:\n"
+                          "• <b>Cloudflare</b> nếu lưu lượng vào qua Tunnel\n"
+                          "• <b>Firewall của nhà cung cấp / máy chủ vật lý</b>\n\n"
                           "Xem cổng đang lắng nghe ở 🖥️ Hệ thống."), "m|fw")
         return (title("🔌", "Mở port / Bật-Tắt firewall",
                       "Chạy qua SSH: <code>hostvn</code> → <b>5. Quan ly Firewall</b> "
@@ -789,7 +797,7 @@ def _run_action(action: str, chat: int):
         "tool_deploy": ("🚀", "Deploy website", "13. Cong cu", "2",
                         "Cần nhập nguồn mã và nhiều tuỳ chọn."),
         "tool_av":     ("🦠", "Cài Anti Virus", "13. Cong cu", "6",
-                        "ImunifyAV chỉ hỗ trợ x86_64 — <b>không chạy trên ARM64</b>."),
+                        "Cài ImunifyAV, quá trình cài kéo dài và cần xác nhận."),
         "tool_ggdl":   ("☁️", "Tải file Google Drive", "13. Cong cu", "9",
                         "Cần nhập link/ID file và thư mục đích."),
         "adm_pass":    (E["key"], "Đổi mật khẩu Admin Tool", "9. Admin Tool", "5",
@@ -1061,18 +1069,54 @@ async def cb_pick(update, context, action, params):
         return await q.edit_message_text(
             title(E["backup"], f"Backup {target}", "Chọn nội dung cần backup:"),
             parse_mode=HTML, reply_markup=menus.backup_type_menu(target))
-    if action == "rsdom":     # chon website -> chon ngay backup
+    if action == "rsdom":     # chon website -> chon ngay backup (may + cloud)
         if not can_write(chat):
             return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
                                              reply_markup=menus.back_only("m|backup"))
+
+        def _find():
+            # Ban tren may VA ban tren cloud (doc so muc luc, khong liet ke remote)
+            return hostvn.backup_dates(target), hostvn.cloud_backups(target)
+
+        def _render(res):
+            local, cloud = res
+            context.user_data["rs_cloud"] = cloud
+            if local or cloud:
+                body = (f"Trên máy: <b>{len(local)}</b> · Trên cloud: <b>{len(cloud)}</b>\n"
+                        "Chọn bản cần khôi phục:")
+            else:
+                body = "Website này chưa có bản backup nào (cả trên máy lẫn cloud)."
+            return (title("♻️", f"Khôi phục {target}", body),
+                    menus.backup_date_menu_ex(target, local, cloud))
+
         return await _progress_op(
             update, True, f"⏳ <b>Đang tìm bản backup của</b> {texts.esc(target)}…",
-            asyncio.to_thread(hostvn.backup_dates, target),
-            lambda dates: (title("♻️", f"Khôi phục {target}",
-                                 "Chọn ngày backup:" if dates
-                                 else "Website này chưa có bản backup nào."),
-                           menus.backup_date_menu(target, dates)),
-            est=3.0)
+            asyncio.to_thread(_find), _render, est=12.0,
+            stages=[(50, "☁️ <b>Đang đọc sổ mục lục trên cloud</b>…")])
+
+    if action == "rscl":      # bk|rscl|<chi_so> -> tai tu cloud ve roi chon kieu
+        if not can_write(chat):
+            return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
+                                             reply_markup=menus.back_only("m|backup"))
+        cloud = context.user_data.get("rs_cloud") or []
+        idx = int(target) if target.isdigit() else -1
+        if not (0 <= idx < len(cloud)):
+            return await q.edit_message_text(
+                f"{E['warn']} Mất ngữ cảnh, chọn lại website.", parse_mode=HTML,
+                reply_markup=menus.back_only("m|backup"))
+        remote, date, dom = cloud[idx]
+        return await _progress_op(
+            update, True,
+            f"☁️ <b>Đang tải bản backup</b> {texts.esc(date)} <b>từ</b> {texts.esc(remote)}…",
+            asyncio.to_thread(hostvn.fetch_cloud_backup, remote, date, dom),
+            lambda r: ((title("♻️", f"Khôi phục {dom}",
+                              f"{texts.esc(r[1])}\nBản ngày <b>{texts.esc(date)}</b>. "
+                              "Chọn nội dung:"),
+                        menus.restore_type_menu(dom, date)) if r[0]
+                       else (title(E["warn"], "Không tải được", texts.esc(r[1])),
+                             menus.back_only("m|backup"))),
+            est=60.0,
+            stages=[(60, "📥 <b>Đang tải file theo đường dẫn</b>…")])
     if action == "domdel":
         if not can_write(chat):
             return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
@@ -1505,7 +1549,62 @@ async def cb_bk(update, context, action, params):
         return await q.edit_message_text(texts.NOTIFY_ONLY, parse_mode=HTML,
                                          reply_markup=menus.back_only("m|backup"))
 
-    # bk|run|<type>|<domain>  -> chay backup ngay
+    # bk|dst|<type>|<domain> -> chon NOI LUU truoc khi chay
+    if action == "dst":
+        btype = params[0] if params else "full"
+        domain = params[1] if len(params) > 1 else ""
+        remotes = await asyncio.to_thread(hostvn.rclone_remotes)
+        # Remote tho "<ten>-s3" bi an: da co alias "<ten>" tro thang vao bucket
+        remotes = [r for r in remotes if not r.endswith("-s3")]
+        # Giu lai de buoc sau tra cuu theo chi so -> callback_data khong qua 64 byte
+        context.user_data["bk_pending"] = {"btype": btype, "domain": domain,
+                                           "remotes": remotes}
+        names = {"full": "full (mã nguồn + DB)", "source": "mã nguồn", "db": "database"}
+        note = ("" if remotes else
+                "\n\n⚠️ Chưa có remote nào. Kết nối GDrive/OneDrive/S3 ở menu "
+                "💾 Backup → 🔗 Kết nối.")
+        return await q.edit_message_text(
+            title(E["backup"], f"Backup {domain}",
+                  f"Nội dung: <b>{names.get(btype, btype)}</b>\nChọn nơi lưu:" + note),
+            parse_mode=HTML, reply_markup=menus.backup_dest_menu(remotes))
+
+    # bk|dogo|local | bk|dogo|<chi_so_remote>  -> chay backup
+    if action == "dogo":
+        pend = context.user_data.get("bk_pending") or {}
+        domain, btype = pend.get("domain", ""), pend.get("btype", "full")
+        if not domain:
+            return await q.edit_message_text(
+                f"{E['warn']} Mất ngữ cảnh, chọn lại website.", parse_mode=HTML,
+                reply_markup=menus.back_only("m|backup"))
+        target = params[0] if params else "local"
+        remote = ""
+        if target != "local":
+            rs = pend.get("remotes", [])
+            if target.isdigit() and int(target) < len(rs):
+                remote = rs[int(target)]
+        context.user_data.pop("bk_pending", None)
+
+        names = {"full": "full (mã nguồn + DB)", "source": "mã nguồn", "db": "database"}
+        where = f"☁️ {remote}" if remote else "💽 máy chủ"
+        return await _progress_op(
+            update, True,
+            f"{E['backup']} <b>Đang backup</b> {texts.esc(domain)} — "
+            f"{names.get(btype, btype)} → {texts.esc(where)}…",
+            asyncio.to_thread(hostvn.backup_site, domain, btype, remote),
+            lambda r: ((title(E["confirm"], f"Backup {domain}",
+                              f"<code>{progress.bar(100)}</code>\n{r[1]}") if r[0]
+                        else title(E["warn"], f"Backup {domain} thất bại", texts.esc(r[1]))),
+                       menus.back_only("m|backup")),
+            est=90.0 if remote else 45.0,
+            stages=([(20, f"📁 <b>Đang nén mã nguồn</b> {texts.esc(domain)}…"),
+                     (45, f"{E['db']} <b>Đang dump database</b>…"),
+                     (70, f"☁️ <b>Đang đẩy lên</b> {texts.esc(remote)}…"),
+                     (92, "📒 <b>Đang ghi sổ mục lục</b>…")] if remote else
+                    [(30, f"📁 <b>Đang nén mã nguồn</b> {texts.esc(domain)}…"),
+                     (70, f"{E['db']} <b>Đang dump database</b>…"),
+                     (90, "🔄 <b>Đang hoàn tất</b>…")]))
+
+    # bk|run|<type>|<domain>  -> chay backup ngay (giu cho tuong thich nut cu)
     if action == "run":
         btype = params[0] if params else "full"
         domain = params[1] if len(params) > 1 else ""
@@ -1664,7 +1763,8 @@ async def cb_yes(update, context, what, params):
             update, True, f"{E['cron']} <b>Đang xoá cronjob</b>…",
             asyncio.to_thread(hostvn.cron_delete_all),
             lambda msg: (title(E["confirm"], "Cronjob", texts.esc(msg) +
-                               "\n⚠️ Lịch đồng bộ DB tmpfs cũng bị xoá — cân nhắc tạo lại."),
+                               "\n⚠️ Lịch auto-backup và gia hạn SSL cũng bị xoá — "
+                               "cân nhắc tạo lại."),
                          menus.back_only("m|cron")), est=8.0)
     if what.startswith("admupd_"):
         ctl = what[7:]
