@@ -60,8 +60,13 @@ param(
     # SSH key (private) - dung cho buoc cai tu dong (van cai vao root, song song mat khau)
     [string]$SshKey = "$PSScriptRoot\..\.ssh\id_ed25519",
 
-    # Mat khau root MAC DINH de SSH bang tai khoan root (doi cho moi truong that!)
-    [string]$RootPassword = 'REDACTED',
+    # Mat khau root: de TRONG (mac dinh) de tu SINH NGAU NHIEN moi lan cai. Se in ra
+    # cuoi qua trinh de ban luu lai. Chi dat thu cong khi ban thuc su muon dung mat khau
+    # co dinh: -RootPassword '...'
+    [string]$RootPassword = '',
+
+    # Mat khau tai khoan 'hostvn' trong container: cung de TRONG de sinh ngau nhien.
+    [string]$UserPassword = '',
 
     # Chi lam toi buoc nao (all|adb|apk|deploy|ssh|install)
     [ValidateSet('all','adb','apk','deploy','ssh','install')]
@@ -89,6 +94,40 @@ function Pause-Manual($m){
     Write-Host "  >>> CAN THAO TAC TREN DIEN THOAI <<<" -ForegroundColor Magenta
     Write-Host "  $m" -ForegroundColor Magenta
     Read-Host "  Xong thi nhan Enter de tiep tuc"
+}
+
+# Sinh mat khau ngau nhien manh bang crypto RNG (khong dung Get-Random - khong an toan).
+function New-RandomPassword([int]$len = 20){
+    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+    $bytes = New-Object 'System.Byte[]' $len
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+}
+
+# Neu user khong tu dat mat khau -> SINH NGAU NHIEN moi lan cai (tranh mat khau mac dinh
+# cung, ai co repo cung biet). Cac mat khau sinh ra se duoc IN RA CUOI qua trinh (Show-Credentials)
+# de user luu lai - khong luu tu dong o dau ca.
+$script:RootPwGenerated = $false
+$script:UserPwGenerated = $false
+if (-not $RootPassword) { $RootPassword = New-RandomPassword 20; $script:RootPwGenerated = $true }
+if (-not $UserPassword) { $UserPassword = New-RandomPassword 16; $script:UserPwGenerated = $true }
+
+# In thong tin dang nhap noi bat de user luu lai. Goi 1 lan o cuoi (hoac khi -Stop ssh).
+function Show-Credentials {
+    Write-Host ""
+    Write-Host "================= LUU LAI THONG TIN DANG NHAP (QUAN TRONG) =================" -ForegroundColor Yellow
+    if ($script:RootPwGenerated) {
+        Write-Host ("  Mat khau root (tu sinh):  {0}" -f $RootPassword) -ForegroundColor Yellow
+    } else {
+        Write-Host  "  Mat khau root:            (do ban tu dat qua -RootPassword)" -ForegroundColor Yellow
+    }
+    if ($script:UserPwGenerated) {
+        Write-Host ("  Mat khau user 'hostvn':   {0}" -f $UserPassword) -ForegroundColor Yellow
+    }
+    Write-Host "  >> Luu NGAY vao trinh quan ly mat khau. Mat khau tu sinh KHONG duoc luu o dau khac." -ForegroundColor Yellow
+    Write-Host "  >> Doi mat khau bat cu luc nao: passwd root" -ForegroundColor Yellow
+    Write-Host "===========================================================================" -ForegroundColor Yellow
+    Write-Host ""
 }
 
 # --- adb helpers (chay lenh, chay lenh root qua su) ---
@@ -217,7 +256,7 @@ DNS="1.1.1.1"
 MOUNTS="/system /sdcard:/mnt/sdcard"
 SSH_PORT="$SshPort"
 USER_NAME="hostvn"
-USER_PASSWORD="hostvn2026"
+USER_PASSWORD="$UserPassword"
 "@
     $confLocal = Join-Path $env:TEMP "$Profile.conf"
     # LF line endings
@@ -270,9 +309,8 @@ function Phase-Ssh {
     $global:PhoneIp = $ip.Trim()
 
     Ok "SSH san sang:"
-    Ok "  >> Bang MAT KHAU (mac dinh): ssh -p $SshPort root@$($global:PhoneIp)   [mat khau: $RootPassword]"
-    Ok "  >> Bang key:                 ssh -i $SshKey -p $SshPort root@$($global:PhoneIp)"
-    Warn "Doi mat khau root ($RootPassword) neu dung cho moi truong that: passwd root"
+    Ok "  >> Bang MAT KHAU: ssh -p $SshPort root@$($global:PhoneIp)"
+    Ok "  >> Bang key:      ssh -i $SshKey -p $SshPort root@$($global:PhoneIp)"
 }
 
 # ============================================================================
@@ -301,6 +339,7 @@ Write-Host "==== HostVN ARM64 Bootstrap ====" -ForegroundColor White
 Phase-Adb;     if ($Stop -eq 'adb')     { return }
 Phase-Apk;     if ($Stop -eq 'apk')     { return }
 Phase-Deploy;  if ($Stop -eq 'deploy')  { return }
-Phase-Ssh;     if ($Stop -eq 'ssh')     { return }
+Phase-Ssh;     if ($Stop -eq 'ssh')     { Show-Credentials; return }
 Phase-Install
+Show-Credentials
 Write-Host "==== XONG ====" -ForegroundColor Green
